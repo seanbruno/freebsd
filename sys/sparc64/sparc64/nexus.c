@@ -233,7 +233,7 @@ nexus_attach(device_t dev)
 		    rman_init(&sc->sc_mem_rman) != 0 ||
 		    rman_manage_region(&sc->sc_intr_rman, 0,
 		    IV_MAX - 1) != 0 ||
-		    rman_manage_region(&sc->sc_mem_rman, 0ULL, ~0ULL) != 0)
+		    rman_manage_region(&sc->sc_mem_rman, 0, BUS_SPACE_MAXADDR) != 0)
 			panic("%s: failed to set up rmans.", __func__);
 	} else
 		node = ofw_bus_get_node(dev);
@@ -370,7 +370,7 @@ nexus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	device_t nexus;
 	int isdefault, passthrough;
 
-	isdefault = (start == 0UL && end == ~0UL);
+	isdefault = RMAN_IS_DEFAULT_RANGE(start, end);
 	passthrough = (device_get_parent(child) != bus);
 	nexus = bus;
 	while (strcmp(device_get_name(device_get_parent(nexus)), "root") != 0)
