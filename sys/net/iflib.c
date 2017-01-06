@@ -3782,7 +3782,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 		*/
 		if (avoid_reset) {
 			if_setflagbits(ifp, IFF_UP,0);
-			if (!(if_getdrvflags(ifp)& IFF_DRV_RUNNING))
+			if (!(if_getdrvflags(ifp) & IFF_DRV_RUNNING))
 				reinit = 1;
 #ifdef INET
 			if (!(if_getflags(ifp) & IFF_NOARP))
@@ -3877,7 +3877,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 #endif
 		setmask |= (mask & IFCAP_FLAGS);
 
-		if (setmask  & (IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6))
+		if (setmask & (IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6))
 			setmask |= (IFCAP_RXCSUM | IFCAP_RXCSUM_IPV6);
 		if ((mask & IFCAP_WOL) &&
 		    (if_getcapabilities(ifp) & IFCAP_WOL) != 0)
@@ -3898,7 +3898,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 			CTX_UNLOCK(ctx);
 		}
 		break;
-	    }
+	}
 	case SIOCGPRIVATE_0:
 	case SIOCSDRVSPEC:
 	case SIOCGDRVSPEC:
