@@ -705,12 +705,12 @@ static int iflib_legacy_setup(if_ctx_t ctx, driver_filter_t filter, void *filter
 static void iflib_txq_check_drain(iflib_txq_t txq, int budget);
 static uint32_t iflib_txq_can_drain(struct ifmp_ring *);
 static int iflib_register(if_ctx_t);
-static void iflib_init_locked(if_ctx_t ctx);
+//static void iflib_init_locked(if_ctx_t ctx);
 static void iflib_add_device_sysctl_pre(if_ctx_t ctx);
 static void iflib_add_device_sysctl_post(if_ctx_t ctx);
 static void iflib_ifmp_purge(iflib_txq_t txq);
 static void _iflib_pre_assert(if_softc_ctx_t scctx);
-static void iflib_stop(if_ctx_t ctx);
+//static void iflib_stop(if_ctx_t ctx);
 static void iflib_if_init_locked(if_ctx_t ctx);
 #ifndef __NO_STRICT_ALIGNMENT
 static struct mbuf * iflib_fixup_rx(struct mbuf *m);
@@ -2140,7 +2140,7 @@ hung:
 	CTX_UNLOCK(ctx);
 }
 
-static void
+void
 iflib_init_locked(if_ctx_t ctx)
 {
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
@@ -2193,7 +2193,7 @@ iflib_init_locked(if_ctx_t ctx)
 			}
 		}
 	}
-	done:
+done:
 	if_setdrvflagbits(ctx->ifc_ifp, IFF_DRV_RUNNING, IFF_DRV_OACTIVE);
 	IFDI_INTR_ENABLE(ctx);
 	txq = ctx->ifc_txqs;
@@ -2226,7 +2226,10 @@ iflib_media_status(if_t ifp, struct ifmediareq *ifmr)
 	CTX_UNLOCK(ctx);
 }
 
+#if 0
 static void
+#endif
+void
 iflib_stop(if_ctx_t ctx)
 {
 	iflib_txq_t txq = ctx->ifc_txqs;
@@ -4042,7 +4045,6 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	uint16_t main_txq;
 	uint16_t main_rxq;
 
-
 	ctx = malloc(sizeof(* ctx), M_IFLIB, M_WAITOK|M_ZERO);
 
 	if (sc == NULL) {
@@ -5255,6 +5257,8 @@ iflib_msix_init(if_ctx_t ctx)
 	if (scctx->isc_disable_msix)
 		goto msi;
 
+// Don't need to set busmaster here...
+#if 0
 	/*
 	** When used in a virtualized environment
 	** PCI BUSMASTER capability may not be set
@@ -5279,6 +5283,7 @@ iflib_msix_init(if_ctx_t ctx)
 			goto msi;
 		}
 	}
+#endif
 
 	/*
 	 * bar == -1 => "trust me I know what I'm doing"

@@ -333,6 +333,9 @@ if_shared_ctx_t iflib_get_sctx(if_ctx_t ctx);
 
 void iflib_set_mac(if_ctx_t ctx, uint8_t mac[ETHER_ADDR_LEN]);
 
+void iflib_init_locked(if_ctx_t ctx);
+void iflib_stop(if_ctx_t ctx);
+
 /*
  * If the driver can plug cleanly in to newbus use these
  */

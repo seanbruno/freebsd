@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright (c) 2013-2015, Intel Corporation 
+  Copyright (c) 2013-2017, Intel Corporation 
   All rights reserved.
   
   Redistribution and use in source and binary forms, with or without 
@@ -178,11 +178,8 @@ ixlv_send_pf_msg(struct ixlv_sc *sc,
 
 	err = i40e_aq_send_msg_to_pf(hw, op, I40E_SUCCESS, msg, len, NULL);
 	if (err)
-		device_printf(dev, "Unable to send opcode %s to PF, "
-		    "status %s, aq error %s\n",
-		    ixl_vc_opcode_str(op),
-		    i40e_stat_str(hw, err),
-		    i40e_aq_str(hw, hw->aq.asq_last_status));
+		device_printf(dev, "Unable to send opcode %d to PF, "
+		    "error %d, aq status %d\n", op, err, hw->aq.asq_last_status);
 	return err;
 }
 
@@ -386,7 +383,9 @@ ixlv_configure_queues(struct ixlv_sc *sc)
 {
 	device_t		dev = sc->dev;
 	struct ixl_vsi		*vsi = &sc->vsi;
-	struct ixl_queue	*que = vsi->queues;
+	if_softc_ctx_t		scctx = iflib_get_softc_ctx(vsi->ctx);
+	struct ixl_tx_queue	*tx_que = vsi->tx_queues;
+	struct ixl_rx_queue	*rx_que = vsi->rx_queues;
 	struct tx_ring		*txr;
 	struct rx_ring		*rxr;
 	int			len, pairs;
@@ -394,7 +393,9 @@ ixlv_configure_queues(struct ixlv_sc *sc)
 	struct i40e_virtchnl_vsi_queue_config_info *vqci;
 	struct i40e_virtchnl_queue_pair_info *vqpi;
 
-	pairs = vsi->num_queues;
+	/* XXX: Linux PF driver wants matching ids in each tx/rx struct, so both TX/RX
+	 * queues of a pair need to be configured */
+	pairs = max(vsi->num_tx_queues, vsi->num_rx_queues);
 	len = sizeof(struct i40e_virtchnl_vsi_queue_config_info) +
 		       (sizeof(struct i40e_virtchnl_queue_pair_info) * pairs);
 	vqci = malloc(len, M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -409,23 +410,25 @@ ixlv_configure_queues(struct ixlv_sc *sc)
 	/* Size check is not needed here - HW max is 16 queue pairs, and we
 	 * can fit info for 31 of them into the AQ buffer before it overflows.
 	 */
-	for (int i = 0; i < pairs; i++, que++, vqpi++) {
-		txr = &que->txr;
-		rxr = &que->rxr;
+	for (int i = 0; i < pairs; i++, tx_que++, rx_que++, vqpi++) {
+		txr = &tx_que->txr;
+		rxr = &rx_que->rxr;
+
 		vqpi->txq.vsi_id = vqci->vsi_id;
 		vqpi->txq.queue_id = i;
-		vqpi->txq.ring_len = que->num_desc;
-		vqpi->txq.dma_ring_addr = txr->dma.pa;
+		vqpi->txq.ring_len = scctx->isc_ntxd[0];
+		vqpi->txq.dma_ring_addr = txr->tx_paddr;
 		/* Enable Head writeback */
 		vqpi->txq.headwb_enabled = 1;
-		vqpi->txq.dma_headwb_addr = txr->dma.pa +
-		    (que->num_desc * sizeof(struct i40e_tx_desc));
+		vqpi->txq.dma_headwb_addr = txr->tx_paddr +
+		    (scctx->isc_ntxd[0] * sizeof(struct i40e_tx_desc));
 
 		vqpi->rxq.vsi_id = vqci->vsi_id;
 		vqpi->rxq.queue_id = i;
-		vqpi->rxq.ring_len = que->num_desc;
-		vqpi->rxq.dma_ring_addr = rxr->dma.pa;
-		vqpi->rxq.max_pkt_size = vsi->max_frame_size;
+		vqpi->rxq.ring_len = scctx->isc_nrxd[0];
+		vqpi->rxq.dma_ring_addr = rxr->rx_paddr;
+		vqpi->rxq.max_pkt_size = scctx->isc_max_frame_size;
+		// TODO: Get this value from iflib, somehow
 		vqpi->rxq.databuffer_size = rxr->mbuf_sz;
 		vqpi->rxq.splithdr_enabled = 0;
 	}
@@ -446,6 +449,8 @@ ixlv_enable_queues(struct ixlv_sc *sc)
 	struct i40e_virtchnl_queue_select vqs;
 
 	vqs.vsi_id = sc->vsi_res->vsi_id;
+	/* XXX: In Linux PF, as long as neither of these is 0,
+	 * every queue in VF VSI is enabled. */
 	vqs.tx_queues = (1 << sc->vsi_res->num_queue_pairs) - 1;
 	vqs.rx_queues = vqs.tx_queues;
 	ixlv_send_pf_msg(sc, I40E_VIRTCHNL_OP_ENABLE_QUEUES,
@@ -463,6 +468,8 @@ ixlv_disable_queues(struct ixlv_sc *sc)
 	struct i40e_virtchnl_queue_select vqs;
 
 	vqs.vsi_id = sc->vsi_res->vsi_id;
+	/* XXX: In Linux PF, as long as neither of these is 0,
+	 * every queue in VF VSI is disabled. */
 	vqs.tx_queues = (1 << sc->vsi_res->num_queue_pairs) - 1;
 	vqs.rx_queues = vqs.tx_queues;
 	ixlv_send_pf_msg(sc, I40E_VIRTCHNL_OP_DISABLE_QUEUES,
@@ -474,6 +481,8 @@ ixlv_disable_queues(struct ixlv_sc *sc)
 **
 ** Request that the PF map queues to interrupt vectors. Misc causes, including
 ** admin queue, are always mapped to vector 0.
+**
+** XXX: In iflib, only RX queues are mapped to HW interrupts
 */
 void
 ixlv_map_queues(struct ixlv_sc *sc)
@@ -481,27 +490,32 @@ ixlv_map_queues(struct ixlv_sc *sc)
 	struct i40e_virtchnl_irq_map_info *vm;
 	int 			i, q, len;
 	struct ixl_vsi		*vsi = &sc->vsi;
-	struct ixl_queue	*que = vsi->queues;
+	struct ixl_rx_queue	*rx_que = vsi->rx_queues;
+	if_softc_ctx_t		scctx = vsi->shared;
+	device_t		dev = sc->dev;
+
+	// XXX: What happens if we only get 1 MSI-X vector?
+	MPASS(scctx->isc_vectors > 1);
 
 	/* How many queue vectors, adminq uses one */
-	q = sc->msix - 1;
+	// XXX: How do we know how many interrupt vectors we have?
+	q = scctx->isc_vectors - 1;
 
 	len = sizeof(struct i40e_virtchnl_irq_map_info) +
-	      (sc->msix * sizeof(struct i40e_virtchnl_vector_map));
+	      (scctx->isc_vectors * sizeof(struct i40e_virtchnl_vector_map));
 	vm = malloc(len, M_DEVBUF, M_NOWAIT);
 	if (!vm) {
-		printf("%s: unable to allocate memory\n", __func__);
+		device_printf(dev, "%s: unable to allocate memory\n", __func__);
 		ixl_vc_schedule_retry(&sc->vc_mgr);
 		return;
 	}
 
-	vm->num_vectors = sc->msix;
+	vm->num_vectors = scctx->isc_vectors;
 	/* Queue vectors first */
-	for (i = 0; i < q; i++, que++) {
+	for (i = 0; i < q; i++, rx_que++) {
 		vm->vecmap[i].vsi_id = sc->vsi_res->vsi_id;
 		vm->vecmap[i].vector_id = i + 1; /* first is adminq */
-		vm->vecmap[i].txq_map = (1 << que->me);
-		vm->vecmap[i].rxq_map = (1 << que->me);
+		vm->vecmap[i].rxq_map = (1 << rx_que->rxr.me);
 		vm->vecmap[i].rxitr_idx = 0;
 		vm->vecmap[i].txitr_idx = 1;
 	}
@@ -809,8 +823,10 @@ ixlv_update_stats_counters(struct ixlv_sc *sc, struct i40e_eth_stats *es)
 	uint64_t tx_discards;
 
 	tx_discards = es->tx_discards;
+#if 0
 	for (int i = 0; i < vsi->num_queues; i++)
 		tx_discards += sc->vsi.queues[i].txr.br->br_drops;
+#endif
 
 	/* Update ifnet stats */
 	IXL_SET_IPACKETS(vsi, es->rx_unicast +
@@ -873,8 +889,12 @@ void
 ixlv_set_rss_hena(struct ixlv_sc *sc)
 {
 	struct i40e_virtchnl_rss_hena hena;
+	struct i40e_hw		*hw = &sc->hw;
 
-	hena.hena = IXL_DEFAULT_RSS_HENA_X722;
+	if (hw->mac.type == I40E_MAC_X722_VF)
+		hena.hena = IXL_DEFAULT_RSS_HENA_X722;
+	else
+		hena.hena = IXL_DEFAULT_RSS_HENA_XL710;
 
 	ixlv_send_pf_msg(sc, I40E_VIRTCHNL_OP_SET_RSS_HENA,
 			  (u8 *)&hena, sizeof(hena));
@@ -910,9 +930,9 @@ ixlv_config_rss_lut(struct ixlv_sc *sc)
 		 * num_queues.)
 		 */
 		que_id = rss_get_indirection_to_bucket(i);
-		que_id = que_id % sc->vsi.num_queues;
+		que_id = que_id % sc->vsi.num_rx_queues;
 #else
-		que_id = i % sc->vsi.num_queues;
+		que_id = i % sc->vsi.num_rx_queues;
 #endif
 		lut = que_id & IXL_RSS_VSI_LUT_ENTRY_MASK;
 		rss_lut_msg->lut[i] = lut;
@@ -959,9 +979,9 @@ ixlv_vc_completion(struct ixlv_sc *sc,
 		case I40E_VIRTCHNL_EVENT_RESET_IMPENDING:
 			device_printf(dev, "PF initiated reset!\n");
 			sc->init_state = IXLV_RESET_PENDING;
-			mtx_unlock(&sc->mtx);
-			ixlv_init(vsi);
-			mtx_lock(&sc->mtx);
+			// mtx_unlock(&sc->mtx);
+			ixlv_if_init(sc->vsi.ctx);
+			// mtx_lock(&sc->mtx);
 			break;
 		default:
 			device_printf(dev, "%s: Unknown event %d from AQ\n",
@@ -975,8 +995,8 @@ ixlv_vc_completion(struct ixlv_sc *sc,
 	/* Catch-all error response */
 	if (v_retval) {
 		device_printf(dev,
-		    "%s: AQ returned error %s to our request %s!\n",
-		    __func__, i40e_stat_str(&sc->hw, v_retval), ixl_vc_opcode_str(v_opcode));
+		    "%s: AQ returned error %d to our request %d!\n",
+		    __func__, v_retval, v_opcode);
 	}
 
 #ifdef IXL_DEBUG
@@ -1021,7 +1041,7 @@ ixlv_vc_completion(struct ixlv_sc *sc,
 			/* Turn on all interrupts */
 			ixlv_enable_intr(vsi);
 			/* And inform the stack we're ready */
-			vsi->ifp->if_drv_flags |= IFF_DRV_RUNNING;
+			// vsi->ifp->if_drv_flags |= IFF_DRV_RUNNING;
 			/* TODO: Clear a state flag, so we know we're ready to run init again */
 		}
 		break;
@@ -1058,8 +1078,8 @@ ixlv_vc_completion(struct ixlv_sc *sc,
 	default:
 #ifdef IXL_DEBUG
 		device_printf(dev,
-		    "%s: Received unexpected message %s from PF.\n",
-		    __func__, ixl_vc_opcode_str(v_opcode));
+		    "%s: Received unexpected message %d from PF.\n",
+		    __func__, v_opcode);
 #endif
 		break;
 	}
@@ -1158,7 +1178,6 @@ ixl_vc_cmd_timeout(void *arg)
 {
 	struct ixl_vc_mgr *mgr = (struct ixl_vc_mgr *)arg;
 
-	IXLV_CORE_LOCK_ASSERT(mgr->sc);
 	ixl_vc_process_completion(mgr, I40E_ERR_TIMEOUT);
 }
 
@@ -1167,7 +1186,6 @@ ixl_vc_cmd_retry(void *arg)
 {
 	struct ixl_vc_mgr *mgr = (struct ixl_vc_mgr *)arg;
 
-	IXLV_CORE_LOCK_ASSERT(mgr->sc);
 	ixl_vc_send_current(mgr);
 }
 
@@ -1210,7 +1228,7 @@ void
 ixl_vc_enqueue(struct ixl_vc_mgr *mgr, struct ixl_vc_cmd *cmd,
 	    uint32_t req, ixl_vc_callback_t *callback, void *arg)
 {
-	IXLV_CORE_LOCK_ASSERT(mgr->sc);
+	// IXLV_CORE_LOCK_ASSERT(mgr->sc);
 
 	if (cmd->flags & IXLV_VC_CMD_FLAG_BUSY) {
 		if (mgr->current == cmd)
@@ -1233,7 +1251,7 @@ ixl_vc_flush(struct ixl_vc_mgr *mgr)
 {
 	struct ixl_vc_cmd *cmd;
 
-	IXLV_CORE_LOCK_ASSERT(mgr->sc);
+	// IXLV_CORE_LOCK_ASSERT(mgr->sc);
 	KASSERT(TAILQ_EMPTY(&mgr->pending) || mgr->current != NULL,
 	    ("ixlv: pending commands waiting but no command in progress"));
 

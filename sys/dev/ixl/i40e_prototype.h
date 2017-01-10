@@ -45,7 +45,8 @@
  * has happened and will assist in the early SW and FW
  * setup.
  */
-
+// DEBUG
+void i40e_resume_aq(struct i40e_hw *hw);
 /* adminq functions */
 enum i40e_status_code i40e_init_adminq(struct i40e_hw *hw);
 enum i40e_status_code i40e_shutdown_adminq(struct i40e_hw *hw);

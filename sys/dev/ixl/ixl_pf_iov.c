@@ -89,8 +89,11 @@ ixl_initialize_sriov(struct ixl_pf *pf)
 	int		iov_error;
 
 	/* SR-IOV is only supported when MSI-X is in use. */
+// TODO: Make iflib stop using VSI as its softc
+#if 0
 	if (pf->msix <= 1)
 		return;
+#endif
 
 	pf_schema = pci_iov_schema_alloc_node();
 	vf_schema = pci_iov_schema_alloc_node();
@@ -157,7 +160,7 @@ ixl_vf_alloc_vsi(struct ixl_pf *pf, struct ixl_vf *vf)
 	    htole16(I40E_AQ_VSI_PROP_QUEUE_MAP_VALID);
 	vsi_ctx.info.mapping_flags = htole16(I40E_AQ_VSI_QUE_MAP_NONCONTIG);
 
-	/* ERJ: Only scattered allocation is supported for VFs right now */
+	/* XXX: Only scattered allocation is supported for VFs right now */
 	for (i = 0; i < vf->qtag.num_active; i++)
 		vsi_ctx.info.queue_mapping[i] = vf->qtag.qidx[i];
 	for (; i < nitems(vsi_ctx.info.queue_mapping); i++)
@@ -172,8 +175,10 @@ ixl_vf_alloc_vsi(struct ixl_pf *pf, struct ixl_vf *vf)
 		return (ixl_adminq_err_to_errno(hw->aq.asq_last_status));
 	vf->vsi.seid = vsi_ctx.seid;
 	vf->vsi.vsi_num = vsi_ctx.vsi_number;
-	// vf->vsi.first_queue = vf->qtag.qidx[0];
-	vf->vsi.num_queues = vf->qtag.num_active;
+	// TODO: How to deal with num tx queues / num rx queues split?
+	// I don't think just assigning this variable is going to work
+	vf->vsi.num_rx_queues = vf->qtag.num_active;
+	vf->vsi.num_tx_queues = vf->qtag.num_active;
 
 	code = i40e_aq_get_vsi_params(hw, &vsi_ctx, NULL);
 	if (code != I40E_SUCCESS)
@@ -204,7 +209,7 @@ ixl_vf_setup_vsi(struct ixl_pf *pf, struct ixl_vf *vf)
 
 	vf->vsi.hw_filters_add = 0;
 	vf->vsi.hw_filters_del = 0;
-	ixl_add_filter(&vf->vsi, ixl_bcast_addr, IXL_VLAN_ANY);
+	// ixl_add_filter(&vf->vsi, ixl_bcast_addr, IXL_VLAN_ANY);
 	ixl_reconfigure_filters(&vf->vsi);
 
 	return (0);
@@ -253,7 +258,7 @@ ixl_vf_map_queues(struct ixl_pf *pf, struct ixl_vf *vf)
 
 	/* Program index of each VF queue into PF queue space
 	 * (This is only needed if QTABLE is enabled) */
-	for (i = 0; i < vf->vsi.num_queues; i++) {
+	for (i = 0; i < vf->vsi.num_tx_queues; i++) {
 		qtable = ixl_pf_qidx_from_vsi_qidx(&vf->qtag, i) <<
 		    I40E_VPLAN_QTABLE_QINDEX_SHIFT;
 
@@ -266,7 +271,7 @@ ixl_vf_map_queues(struct ixl_pf *pf, struct ixl_vf *vf)
 	/* Map queues allocated to VF to its VSI;
 	 * This mapping matches the VF-wide mapping since the VF
 	 * is only given a single VSI */
-	for (i = 0; i < vf->vsi.num_queues; i++)
+	for (i = 0; i < vf->vsi.num_tx_queues; i++)
 		ixl_vf_map_vsi_queue(hw, vf, i,
 		    ixl_pf_qidx_from_vsi_qidx(&vf->qtag, i));
 
@@ -335,7 +340,8 @@ ixl_vf_release_resources(struct ixl_pf *pf, struct ixl_vf *vf)
 		ixl_vf_unregister_intr(hw, vpint_reg);
 	}
 
-	vf->vsi.num_queues = 0;
+	vf->vsi.num_tx_queues = 0;
+	vf->vsi.num_rx_queues = 0;
 }
 
 static int
@@ -533,13 +539,13 @@ ixl_vf_get_resources_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 					 I40E_VIRTCHNL_VF_OFFLOAD_VLAN);
 
 	reply.num_vsis = 1;
-	reply.num_queue_pairs = vf->vsi.num_queues;
+	reply.num_queue_pairs = vf->vsi.num_tx_queues;
 	reply.max_vectors = pf->hw.func_caps.num_msix_vectors_vf;
 	reply.rss_key_size = 52;
 	reply.rss_lut_size = 64;
 	reply.vsi_res[0].vsi_id = vf->vsi.vsi_num;
 	reply.vsi_res[0].vsi_type = I40E_VSI_SRIOV;
-	reply.vsi_res[0].num_queue_pairs = vf->vsi.num_queues;
+	reply.vsi_res[0].num_queue_pairs = vf->vsi.num_tx_queues;
 	memcpy(reply.vsi_res[0].default_mac_addr, vf->mac, ETHER_ADDR_LEN);
 
 	ixl_send_vf_msg(pf, vf, I40E_VIRTCHNL_OP_GET_VF_RESOURCES,
@@ -674,9 +680,9 @@ ixl_vf_config_vsi_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 	}
 
 	info = msg;
-	if (info->num_queue_pairs == 0 || info->num_queue_pairs > vf->vsi.num_queues) {
+	if (info->num_queue_pairs == 0 || info->num_queue_pairs > vf->vsi.num_tx_queues) {
 		device_printf(pf->dev, "VF %d: invalid # of qpairs (msg has %d, VSI has %d)\n",
-		    vf->vf_num, info->num_queue_pairs, vf->vsi.num_queues);
+		    vf->vf_num, info->num_queue_pairs, vf->vsi.num_tx_queues);
 		i40e_send_vf_nack(pf, vf, I40E_VIRTCHNL_OP_CONFIG_VSI_QUEUES,
 		    I40E_ERR_PARAM);
 		return;
@@ -705,7 +711,7 @@ ixl_vf_config_vsi_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 		if (pair->txq.vsi_id != vf->vsi.vsi_num ||
 		    pair->rxq.vsi_id != vf->vsi.vsi_num ||
 		    pair->txq.queue_id != pair->rxq.queue_id ||
-		    pair->txq.queue_id >= vf->vsi.num_queues) {
+		    pair->txq.queue_id >= vf->vsi.num_tx_queues) {
 
 			i40e_send_vf_nack(pf, vf,
 			    I40E_VIRTCHNL_OP_CONFIG_VSI_QUEUES, I40E_ERR_PARAM);
@@ -854,7 +860,7 @@ ixl_vf_config_irq_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 
 		if (vector->rxq_map != 0) {
 			largest_rxq = fls(vector->rxq_map) - 1;
-			if (largest_rxq >= vf->vsi.num_queues) {
+			if (largest_rxq >= vf->vsi.num_rx_queues) {
 				i40e_send_vf_nack(pf, vf,
 				    I40E_VIRTCHNL_OP_CONFIG_IRQ_MAP,
 				    I40E_ERR_PARAM);
@@ -864,7 +870,7 @@ ixl_vf_config_irq_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 
 		if (vector->txq_map != 0) {
 			largest_txq = fls(vector->txq_map) - 1;
-			if (largest_txq >= vf->vsi.num_queues) {
+			if (largest_txq >= vf->vsi.num_tx_queues) {
 				i40e_send_vf_nack(pf, vf,
 				    I40E_VIRTCHNL_OP_CONFIG_IRQ_MAP,
 				    I40E_ERR_PARAM);
@@ -911,7 +917,7 @@ ixl_vf_enable_queues_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 	for (int i = 0; i < 32; i++) {
 		if ((1 << i) & select->tx_queues) {
 			/* Warn if queue is out of VF allocation range */
-			if (i >= vf->vsi.num_queues) {
+			if (i >= vf->vsi.num_tx_queues) {
 				device_printf(pf->dev, "VF %d: TX ring %d is outside of VF VSI allocation!\n",
 				    vf->vf_num, i);
 				break;
@@ -936,7 +942,7 @@ ixl_vf_enable_queues_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 	for (int i = 0; i < 32; i++) {
 		if ((1 << i) & select->rx_queues) {
 			/* Warn if queue is out of VF allocation range */
-			if (i >= vf->vsi.num_queues) {
+			if (i >= vf->vsi.num_rx_queues) {
 				device_printf(pf->dev, "VF %d: RX ring %d is outside of VF VSI allocation!\n",
 				    vf->vf_num, i);
 				break;
@@ -990,7 +996,7 @@ ixl_vf_disable_queues_msg(struct ixl_pf *pf, struct ixl_vf *vf,
 	for (int i = 0; i < 32; i++) {
 		if ((1 << i) & select->tx_queues) {
 			/* Warn if queue is out of VF allocation range */
-			if (i >= vf->vsi.num_queues) {
+			if (i >= vf->vsi.num_tx_queues) {
 				device_printf(pf->dev, "VF %d: TX ring %d is outside of VF VSI allocation!\n",
 				    vf->vf_num, i);
 				break;
@@ -1016,7 +1022,7 @@ ixl_vf_disable_queues_msg(struct ixl_pf *pf, struct ixl_vf *vf,
 	for (int i = 0; i < 32; i++) {
 		if ((1 << i) & select->rx_queues) {
 			/* Warn if queue is out of VF allocation range */
-			if (i >= vf->vsi.num_queues) {
+			if (i >= vf->vsi.num_rx_queues) {
 				device_printf(pf->dev, "VF %d: RX ring %d is outside of VF VSI allocation!\n",
 				    vf->vf_num, i);
 				break;
@@ -1058,6 +1064,8 @@ ixl_zero_mac(const uint8_t *addr)
 static bool
 ixl_bcast_mac(const uint8_t *addr)
 {
+	static uint8_t ixl_bcast_addr[ETHER_ADDR_LEN] =
+	    {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 	return (cmp_etheraddr(addr, ixl_bcast_addr));
 }
@@ -1600,7 +1608,7 @@ ixl_handle_vflr(void *arg, int pending)
 	pf = arg;
 	hw = &pf->hw;
 
-	IXL_PF_LOCK(pf);
+	/* TODO: May need to lock this */
 	for (i = 0; i < pf->num_vfs; i++) {
 		global_vf_num = hw->func_caps.vf_base_id + i;
 
@@ -1619,12 +1627,13 @@ ixl_handle_vflr(void *arg, int pending)
 		}
 	}
 
+	atomic_clear_32(&pf->state, IXL_PF_STATE_VF_RESET_REQ);
 	icr0 = rd32(hw, I40E_PFINT_ICR0_ENA);
 	icr0 |= I40E_PFINT_ICR0_ENA_VFLR_MASK;
 	wr32(hw, I40E_PFINT_ICR0_ENA, icr0);
 	ixl_flush(hw);
 
-	IXL_PF_UNLOCK(pf);
+	// TODO: IXL_PF_UNLOCK() was here
 }
 
 static int
@@ -1694,7 +1703,7 @@ ixl_iov_init(device_t dev, uint16_t num_vfs, const nvlist_t *params)
 	hw = &pf->hw;
 	pf_vsi = &pf->vsi;
 
-	IXL_PF_LOCK(pf);
+	// TODO: IXL_PF_LOCK() was here
 	pf->vfs = malloc(sizeof(struct ixl_vf) * num_vfs, M_IXL, M_NOWAIT |
 	    M_ZERO);
 
@@ -1716,13 +1725,13 @@ ixl_iov_init(device_t dev, uint16_t num_vfs, const nvlist_t *params)
 	}
 
 	pf->num_vfs = num_vfs;
-	IXL_PF_UNLOCK(pf);
+	// TODO: IXL_PF_UNLOCK() was here
 	return (0);
 
 fail:
 	free(pf->vfs, M_IXL);
 	pf->vfs = NULL;
-	IXL_PF_UNLOCK(pf);
+	// TODO: IXL_PF_UNLOCK() was here
 	return (error);
 }
 
@@ -1741,7 +1750,7 @@ ixl_iov_uninit(device_t dev)
 	vsi = &pf->vsi;
 	ifp = vsi->ifp;
 
-	IXL_PF_LOCK(pf);
+	// TODO: IXL_PF_LOCK() was here
 	for (i = 0; i < pf->num_vfs; i++) {
 		if (pf->vfs[i].vsi.seid != 0)
 			i40e_aq_delete_element(hw, pf->vfs[i].vsi.seid, NULL);
@@ -1761,7 +1770,7 @@ ixl_iov_uninit(device_t dev)
 
 	pf->vfs = NULL;
 	pf->num_vfs = 0;
-	IXL_PF_UNLOCK(pf);
+	// TODO: IXL_PF_UNLOCK() was here
 
 	/* Do this after the unlock as sysctl_ctx_free might sleep. */
 	for (i = 0; i < num_vfs; i++)
@@ -1814,7 +1823,7 @@ ixl_add_vf(device_t dev, uint16_t vfnum, const nvlist_t *params)
 	pf = device_get_softc(dev);
 	vf = &pf->vfs[vfnum];
 
-	IXL_PF_LOCK(pf);
+	// TODO: IXL_PF_LOCK() was here
 	vf->vf_num = vfnum;
 
 	vf->vsi.back = pf;
@@ -1854,7 +1863,7 @@ ixl_add_vf(device_t dev, uint16_t vfnum, const nvlist_t *params)
 
 	ixl_reset_vf(pf, vf);
 out:
-	IXL_PF_UNLOCK(pf);
+	// TODO: IXL_PF_UNLOCK() was here
 	if (error == 0) {
 		snprintf(sysctl_name, sizeof(sysctl_name), "vf%d", vfnum);
 		ixl_add_vsi_sysctls(pf, &vf->vsi, &vf->ctx, sysctl_name);

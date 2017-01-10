@@ -146,15 +146,6 @@ void prefetch(void *x)
 #define	prefetch(x)
 #endif
 
-struct i40e_osdep {
-	bus_space_tag_t		mem_bus_space_tag;
-	bus_space_handle_t	mem_bus_space_handle;
-	bus_size_t		mem_bus_space_size;
-	uint32_t		flush_reg;
-	int			i2c_intfc_num;
-	device_t		dev;
-};
-
 struct i40e_dma_mem {
 	void			*va;
 	u64			pa;
@@ -164,6 +155,19 @@ struct i40e_dma_mem {
 	bus_size_t              size;
 	int			nseg;
 	int                     flags;
+	int			type;
+};
+
+struct i40e_osdep {
+	// TODO: DEBUG -- have the HMC re-use this memory instead of destroying/creating a new one
+	struct i40e_dma_mem	lan_hmc_mem;
+
+	bus_space_tag_t		mem_bus_space_tag;
+	bus_space_handle_t	mem_bus_space_handle;
+	bus_size_t		mem_bus_space_size;
+	uint32_t		flush_reg;
+	int			i2c_intfc_num;
+	device_t		dev;
 };
 
 struct i40e_virt_mem {

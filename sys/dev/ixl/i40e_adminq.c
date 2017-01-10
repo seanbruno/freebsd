@@ -548,7 +548,10 @@ shutdown_arq_out:
  *  i40e_resume_aq - resume AQ processing from 0
  *  @hw: pointer to the hardware structure
  **/
+#if 0
 static void i40e_resume_aq(struct i40e_hw *hw)
+#endif
+void i40e_resume_aq(struct i40e_hw *hw)
 {
 	/* Registers are reset after PF reset */
 	hw->aq.asq.next_to_use = 0;
