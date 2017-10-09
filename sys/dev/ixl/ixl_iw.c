@@ -55,6 +55,8 @@ ixl_iw_pf_msix_reset(struct ixl_pf *pf)
 	u32 reg;
 	int vec;
 
+	device_printf(pf->dev, "debug: IXL_IW_VEC_BASE: %d\n", IXL_IW_VEC_BASE(pf));
+
 	for (vec = IXL_IW_VEC_BASE(pf); vec < IXL_IW_VEC_LIMIT(pf); vec++) {
 		reg = I40E_PFINT_LNKLSTN_FIRSTQ_INDX_MASK;
 		wr32(hw, I40E_PFINT_LNKLSTN(vec - 1), reg);

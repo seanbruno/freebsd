@@ -280,7 +280,7 @@ static struct if_shared_ctx ixl_sctx_init = {
 	// TODO: Review the rx_maxsize and rx_maxsegsize params
 	// Where are they used in iflib?
 	.isc_rx_maxsize = 16384,
-	.isc_rx_nsegments = 1, // XXX: This is probably 5
+	.isc_rx_nsegments = 5, // XXX: This is probably 5
 	.isc_rx_maxsegsize = 16384,
 	// TODO: What is isc_nfl for?
 	.isc_nfl = 1,
@@ -323,9 +323,11 @@ ixl_allocate_pci_resources(struct ixl_pf *pf)
 	    &rid, RF_ACTIVE);
 
 	if (!(pf->pci_mem)) {
-		device_printf(dev, "Unable to allocate bus resource: PCI memory\n");
+		device_printf(dev, "%s: Unable to allocate bus resource: PCI memory\n");
 		return (ENXIO);
 	}
+
+	IXL_DEV_ERR(dev, "TEST");
 
 	/* Save off the PCI information */
 	hw->vendor_id = pci_get_vendor(dev);
@@ -401,21 +403,10 @@ ixl_if_attach_pre(if_ctx_t ctx)
 	if (error)
 		return (error);
 
-	/*
-	 * TODO: Excoriate mmacy for not documenting what needs to be set in the iflib stuff
-	 * in attach_pre()
-	 * Or, in general...
-	 */
-	/*
-	scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0]
-	    * sizeof(struct i40e_tx_desc) + sizeof(u32), DBA_ALIGN);
-	*/
 	scctx->isc_txqsizes[0] = roundup2(scctx->isc_ntxd[0]
 	    * sizeof(struct i40e_tx_desc), DBA_ALIGN);
 	scctx->isc_rxqsizes[0] = roundup2(scctx->isc_nrxd[0]
 	    * sizeof(union i40e_32byte_rx_desc), DBA_ALIGN);
-	/* XXX: No idea what this does */
-	scctx->isc_max_txqsets = scctx->isc_max_rxqsets = 32;
 
 	/* Do PCI setup - map BAR0, etc */
 	if (ixl_allocate_pci_resources(pf)) {
@@ -442,6 +433,16 @@ ixl_if_attach_pre(if_ctx_t ctx)
 		error = EIO;
 		goto err_out;
 	}
+
+	/*
+	 * XXX: No idea what this does
+	 * Current working assumption is that this max amount of queues
+	 * that this interface can have
+	 */
+	if (hw->mac.type == I40E_MAC_X722)
+		scctx->isc_ntxqsets_max = scctx->isc_nrxqsets_max = 128;
+	else
+		scctx->isc_ntxqsets_max = scctx->isc_nrxqsets_max = 64;
 
 	/* Set admin queue parameters */
 	hw->aq.num_arq_entries = IXL_AQ_LEN;
@@ -489,16 +490,6 @@ ixl_if_attach_pre(if_ctx_t ctx)
 		    error);
 		goto err_get_cap;
 	}
-
-	/* DEBUG/TODO: Set up re-usable DMA block for lan hmc */
-	status = i40e_allocate_dma_mem(hw, &((pf->osdep).lan_hmc_mem), 0, 122880,
-					 I40E_HMC_PD_BP_BUF_ALIGNMENT);
-	if (status) {
-		device_printf(dev, "dma pre-alloc for LAN HMC failed: %s\n",
-		    i40e_stat_str(hw, status));
-		goto err_get_cap;
-	}
-	pf->osdep.lan_hmc_mem.type = i40e_mem_bp_jumbo;
 
 	/* Set up host memory cache */
 	status = i40e_init_lan_hmc(hw, hw->func_caps.num_tx_qp,
@@ -602,7 +593,6 @@ ixl_if_attach_post(if_ctx_t ctx)
 	}
 
 	/* Init queue allocation manager */
-	/* XXX: This init can go in pre or post; allocation must be in post */
 	error = ixl_pf_qmgr_init(&pf->qmgr, hw->func_caps.num_tx_qp);
 	if (error) {
 		device_printf(dev, "Failed to init queue manager for PF queues, error %d\n",
@@ -610,7 +600,6 @@ ixl_if_attach_post(if_ctx_t ctx)
 		goto err_mac_hmc;
 	}
 	/* reserve a contiguous allocation for the PF's VSI */
-	/* TODO: Could be refined? */
 	error = ixl_pf_qmgr_alloc_contiguous(&pf->qmgr,
 	    max(vsi->num_tx_queues, vsi->num_rx_queues), &pf->qtag);
 	if (error) {
@@ -620,7 +609,6 @@ ixl_if_attach_post(if_ctx_t ctx)
 	}
 	device_printf(dev, "Allocating %d queues for PF LAN VSI; %d queues active\n",
 	    pf->qtag.num_allocated, pf->qtag.num_active);
-
 
 	/* Limit PHY interrupts to link, autoneg, and modules failure */
 	status = i40e_aq_set_phy_int_mask(hw, IXL_DEFAULT_PHY_INT_MASK,
@@ -696,7 +684,7 @@ ixl_if_detach(if_ctx_t ctx)
 	struct i40e_hw		*hw = &pf->hw;
 	device_t		dev = pf->dev;
 	i40e_status		status;
-#ifdef PCI_IOV
+#if defined(PCI_IOV) || defined(IXL_IW)
 	int			error;
 #endif
 
@@ -728,9 +716,11 @@ ixl_if_detach(if_ctx_t ctx)
 			    i40e_stat_str(hw, status));
 	}
 
+#if 0
 	// DEBUG/HACK/TODO
 	pf->osdep.lan_hmc_mem.type = 0;
 	i40e_free_dma_mem(hw, &(pf->osdep.lan_hmc_mem));
+#endif
 
 	/* Shutdown admin queue */
 	ixl_disable_intr0(hw);
@@ -921,7 +911,8 @@ ixl_if_msix_intr_assign(if_ctx_t ctx, int msix)
 	    ixl_msix_adminq, pf, 0, "aq");
 	if (err) {
 		iflib_irq_free(ctx, &vsi->irq);
-		device_printf(iflib_get_dev(ctx), "Failed to register Admin que handler");
+		device_printf(iflib_get_dev(ctx),
+		    "Failed to register Admin que handler");
 		return (err);
 	}
 	pf->admvec = vector;
@@ -933,12 +924,13 @@ ixl_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		rid = vector + 1;
 
 		snprintf(buf, sizeof(buf), "rxq%d", i);
-		err = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid, IFLIB_INTR_RXTX,
-		    ixl_msix_que, rx_que, rx_que->rxr.me, buf);
+		err = iflib_irq_alloc_generic(ctx, &rx_que->que_irq, rid,
+		    IFLIB_INTR_RXTX, ixl_msix_que, rx_que, rx_que->rxr.me, buf);
 		/* XXX: Does the driver work as expected if there are fewer num_rx_queues than
 		 * what's expected in the iflib context? */
 		if (err) {
-			device_printf(iflib_get_dev(ctx), "Failed to allocate q int %d err: %d", i, err);
+			device_printf(iflib_get_dev(ctx),
+			"Failed to allocate q int %d err: %d", i, err);
 			vsi->num_rx_queues = i + 1;
 			goto fail;
 		}
@@ -949,7 +941,11 @@ ixl_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		rid = vector + 1;
 
 		snprintf(buf, sizeof(buf), "txq%d", i);
-		iflib_softirq_alloc_generic(ctx, rid, IFLIB_INTR_TX, tx_que, tx_que->txr.me, buf);
+		iflib_softirq_alloc_generic(ctx,
+		    // TODO: Use this line once taskgroup_attach_cpu setaffinity is fixed
+		    // &vsi->rx_queues[i % vsi->num_rx_queues].que_irq,
+		    rid,
+		    IFLIB_INTR_TX, tx_que, tx_que->txr.me, buf);
 
 		/* TODO: Maybe call a strategy function for this to figure out which
 		* interrupts to map Tx queues to. I don't know if there's an immediately
@@ -999,7 +995,6 @@ ixl_if_disable_intr(if_ctx_t ctx)
 	struct ixl_vsi		*vsi = iflib_get_softc(ctx);
 	struct i40e_hw		*hw = vsi->hw;
 	struct ixl_rx_queue	*rx_que = vsi->rx_queues;
-	u32 reg;
 
 	if (vsi->shared->isc_intr == IFLIB_INTR_MSIX) {
 		for (int i = 0; i < vsi->num_rx_queues; i++, rx_que++)
@@ -1300,8 +1295,10 @@ ixl_if_update_admin_status(if_ctx_t ctx)
 		iflib_init_locked(ctx);
 	}
 
+#ifdef PCI_IOV
 	if (pf->state & IXL_PF_STATE_VF_RESET_REQ)
 		ixl_handle_vflr(pf, 0);
+#endif
 
 	ixl_process_adminq(pf, &pending);
 	ixl_update_link_status(ctx);

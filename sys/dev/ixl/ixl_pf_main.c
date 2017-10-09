@@ -178,12 +178,9 @@ ixl_configure_itr(struct ixl_pf *pf)
 	ixl_configure_rx_itr(pf);
 }
 
-/*********************************************************************
- *
+/*
  *  Get the hardware capabilities
- *
- **********************************************************************/
-
+ */
 int
 ixl_get_hw_capabilities(struct ixl_pf *pf)
 {
@@ -223,8 +220,7 @@ retry:
 	pf->qbase = hw->func_caps.base_queue;
 
 #ifdef IXL_DEBUG
-	device_printf(dev, "pf_id=%d, num_vfs=%d, msix_pf=%d, "
-	    "msix_vf=%d, fd_g=%d, fd_b=%d, tx_qp=%d rx_qp=%d qbase=%d\n",
+	device_printf(dev, "pf_id=%d, num_vfs=%d, msix_pf=%d, msix_vf=%d, fd_g=%d, fd_b=%d, tx_qp=%d rx_qp=%d qbase=%d\n",
 	    hw->pf_id, hw->func_caps.num_vfs,
 	    hw->func_caps.num_msix_vectors,
 	    hw->func_caps.num_msix_vectors_vf,
