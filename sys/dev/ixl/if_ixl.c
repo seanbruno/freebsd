@@ -942,9 +942,7 @@ ixl_if_msix_intr_assign(if_ctx_t ctx, int msix)
 
 		snprintf(buf, sizeof(buf), "txq%d", i);
 		iflib_softirq_alloc_generic(ctx,
-		    // TODO: Use this line once taskgroup_attach_cpu setaffinity is fixed
-		    // &vsi->rx_queues[i % vsi->num_rx_queues].que_irq,
-		    rid,
+		    &vsi->rx_queues[i % vsi->num_rx_queues].que_irq,
 		    IFLIB_INTR_TX, tx_que, tx_que->txr.me, buf);
 
 		/* TODO: Maybe call a strategy function for this to figure out which
