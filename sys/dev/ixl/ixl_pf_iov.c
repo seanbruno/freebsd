@@ -1414,7 +1414,8 @@ ixl_vf_config_rss_key_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 		}
 	} else {
 		for (int i = 0; i < (key->key_len / 4); i++)
-			i40e_write_rx_ctl(hw, I40E_VFQF_HKEY1(i, IXL_GLOBAL_VF_NUM(hw, vf)), ((u32 *)key->key)[i]);
+			// Make sure vf is the right number
+			i40e_write_rx_ctl(hw, I40E_VFQF_HKEY1(i, vf->vf_num), ((u32 *)key->key)[i]);
 	}
 
 	DDPRINTF(pf->dev, "VF %d: Programmed key starting with 0x%x ok!",
@@ -1469,7 +1470,7 @@ ixl_vf_config_rss_lut_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 		}
 	} else {
 		for (int i = 0; i < (lut->lut_entries / 4); i++)
-			i40e_write_rx_ctl(hw, I40E_VFQF_HLUT1(i, IXL_GLOBAL_VF_NUM(hw, vf)), ((u32 *)lut->lut)[i]);
+			i40e_write_rx_ctl(hw, I40E_VFQF_HLUT1(i, vf->vf_num), ((u32 *)lut->lut)[i]);
 	}
 
 	DDPRINTF(pf->dev, "VF %d: Programmed LUT starting with 0x%x and length %d ok!",
@@ -1496,8 +1497,8 @@ ixl_vf_set_rss_hena_msg(struct ixl_pf *pf, struct ixl_vf *vf, void *msg,
 	hena = msg;
 
 	/* Set HENA */
-	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(0, IXL_GLOBAL_VF_NUM(hw, vf)), (u32)hena->hena);
-	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(1, IXL_GLOBAL_VF_NUM(hw, vf)), (u32)(hena->hena >> 32));
+	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(0, vf->vf_num), (u32)hena->hena);
+	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(1, vf->vf_num), (u32)(hena->hena >> 32));
 
 	DDPRINTF(pf->dev, "VF %d: Programmed HENA with 0x%016lx",
 	    vf->vf_num, hena->hena);

@@ -323,7 +323,7 @@ ixl_allocate_pci_resources(struct ixl_pf *pf)
 	    &rid, RF_ACTIVE);
 
 	if (!(pf->pci_mem)) {
-		device_printf(dev, "%s: Unable to allocate bus resource: PCI memory\n");
+		device_printf(dev, "Unable to allocate bus resource: PCI memory\n");
 		return (ENXIO);
 	}
 
