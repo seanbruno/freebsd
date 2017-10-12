@@ -147,7 +147,6 @@ struct sctp_extrcvinfo {
 	uint16_t sinfo_keynumber_valid;
 	uint8_t __reserve_pad[SCTP_ALIGN_RESV_PAD_SHORT];
 };
-
 #define sinfo_pr_value sinfo_timetolive
 #define sreinfo_next_flags serinfo_next_flags
 #define sreinfo_next_stream serinfo_next_stream
@@ -259,7 +258,8 @@ struct sctp_snd_all_completes {
 /* The lower four bits is an enumeration of PR-SCTP policies */
 #define SCTP_PR_SCTP_NONE 0x0000/* Reliable transfer */
 #define SCTP_PR_SCTP_TTL  0x0001/* Time based PR-SCTP */
-#define SCTP_PR_SCTP_BUF  0x0002/* Buffer based PR-SCTP */
+#define SCTP_PR_SCTP_PRIO 0x0002/* Buffer based PR-SCTP */
+#define SCTP_PR_SCTP_BUF  SCTP_PR_SCTP_PRIO	/* For backwards compatibility */
 #define SCTP_PR_SCTP_RTX  0x0003/* Number of retransmissions based PR-SCTP */
 #define SCTP_PR_SCTP_MAX  SCTP_PR_SCTP_RTX
 #define SCTP_PR_SCTP_ALL  0x000f/* Used for aggregated stats */
@@ -318,12 +318,13 @@ struct sctp_assoc_change {
 #define SCTP_CANT_STR_ASSOC     0x0005
 
 /* sac_info values */
-#define SCTP_ASSOC_SUPPORTS_PR        0x01
-#define SCTP_ASSOC_SUPPORTS_AUTH      0x02
-#define SCTP_ASSOC_SUPPORTS_ASCONF    0x03
-#define SCTP_ASSOC_SUPPORTS_MULTIBUF  0x04
-#define SCTP_ASSOC_SUPPORTS_RE_CONFIG 0x05
-#define SCTP_ASSOC_SUPPORTS_MAX       0x05
+#define SCTP_ASSOC_SUPPORTS_PR			0x01
+#define SCTP_ASSOC_SUPPORTS_AUTH		0x02
+#define SCTP_ASSOC_SUPPORTS_ASCONF		0x03
+#define SCTP_ASSOC_SUPPORTS_MULTIBUF		0x04
+#define SCTP_ASSOC_SUPPORTS_RE_CONFIG		0x05
+#define SCTP_ASSOC_SUPPORTS_INTERLEAVING	0x06
+#define SCTP_ASSOC_SUPPORTS_MAX			0x06
 /*
  * Address event
  */
@@ -571,7 +572,6 @@ struct sctp_paddrparams {
 	uint16_t spp_pathmaxrxt;
 	uint8_t spp_dscp;
 };
-
 #define spp_ipv4_tos spp_dscp
 
 #define SPP_HB_ENABLE		0x00000001
@@ -589,6 +589,7 @@ struct sctp_paddrthlds {
 	sctp_assoc_t spt_assoc_id;
 	uint16_t spt_pathmaxrxt;
 	uint16_t spt_pathpfthld;
+	uint16_t spt_pathcpthld;
 };
 
 struct sctp_paddrinfo {
@@ -1238,7 +1239,9 @@ struct xsctp_raddr {
 	uint32_t rtt;
 	uint32_t heartbeat_interval;
 	uint32_t ssthresh;
-	uint32_t extra_padding[30];	/* future */
+	uint16_t encaps_port;
+	uint16_t state;
+	uint32_t extra_padding[29];	/* future */
 };
 
 #define SCTP_MAX_LOGGING_SIZE 30000
@@ -1281,7 +1284,6 @@ sctp_sorecvmsg(struct socket *so,
     int *msg_flags,
     struct sctp_sndrcvinfo *sinfo,
     int filling_sinfo);
-
 #endif
 
 /*

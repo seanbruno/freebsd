@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,6 +36,7 @@
 
 #include "opt_inet.h"
 #include "opt_inet6.h"
+#include "opt_rss.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -156,7 +157,7 @@ vnet_loif_init(const void *unused __unused)
 	    1);
 #endif
 }
-VNET_SYSINIT(vnet_loif_init, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
+VNET_SYSINIT(vnet_loif_init, SI_SUB_PSEUDO, SI_ORDER_ANY,
     vnet_loif_init, NULL);
 
 #ifdef VIMAGE
@@ -167,7 +168,7 @@ vnet_loif_uninit(const void *unused __unused)
 	if_clone_detach(V_lo_cloner);
 	V_loif = NULL;
 }
-VNET_SYSUNINIT(vnet_loif_uninit, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
+VNET_SYSUNINIT(vnet_loif_uninit, SI_SUB_INIT_IF, SI_ORDER_SECOND,
     vnet_loif_uninit, NULL);
 #endif
 
@@ -223,6 +224,10 @@ looutput(struct ifnet *ifp, struct mbuf *m, const struct sockaddr *dst,
 
 	if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 	if_inc_counter(ifp, IFCOUNTER_OBYTES, m->m_pkthdr.len);
+
+#ifdef RSS
+	M_HASHTYPE_CLEAR(m);
+#endif
 
 	/* BPF writes need to be handled specially. */
 	if (dst->sa_family == AF_UNSPEC || dst->sa_family == pseudo_AF_HDRCMPLT)
@@ -380,7 +385,7 @@ loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if (ifr == 0) {
+		if (ifr == NULL) {
 			error = EAFNOSUPPORT;		/* XXX */
 			break;
 		}

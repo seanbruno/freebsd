@@ -190,6 +190,11 @@ g_mountver_start(struct bio *bp)
 	 * requests in order to maintain ordering.
 	 */
 	if (sc->sc_orphaned || !TAILQ_EMPTY(&sc->sc_queue)) {
+		if (sc->sc_shutting_down) {
+			G_MOUNTVER_LOGREQ(bp, "Discarding request due to shutdown.");
+			g_io_deliver(bp, ENXIO);
+			return;
+		}
 		G_MOUNTVER_LOGREQ(bp, "Queueing request.");
 		g_mountver_queue(bp);
 		if (!sc->sc_orphaned)
@@ -327,7 +332,7 @@ g_mountver_destroy(struct g_geom *gp, boolean_t force)
 		G_MOUNTVER_DEBUG(0, "Device %s removed.", gp->name);
 	}
 	if (pp != NULL)
-		g_orphan_provider(pp, ENXIO);
+		g_wither_provider(pp, ENXIO);
 	g_mountver_discard_queued(gp);
 	g_free(sc->sc_provider_name);
 	g_free(gp->softc);
@@ -607,16 +612,21 @@ g_mountver_dumpconf(struct sbuf *sb, const char *indent, struct g_geom *gp,
 static void
 g_mountver_shutdown_pre_sync(void *arg, int howto)
 {
+	struct g_mountver_softc *sc;
 	struct g_class *mp;
 	struct g_geom *gp, *gp2;
 
 	mp = arg;
-	DROP_GIANT();
 	g_topology_lock();
-	LIST_FOREACH_SAFE(gp, &mp->geom, geom, gp2)
-		g_mountver_destroy(gp, 1);
+	LIST_FOREACH_SAFE(gp, &mp->geom, geom, gp2) {
+		if (gp->softc == NULL)
+			continue;
+		sc = gp->softc;
+		sc->sc_shutting_down = 1;
+		if (sc->sc_orphaned)
+			g_mountver_destroy(gp, 1);
+	}
 	g_topology_unlock();
-	PICKUP_GIANT();
 }
 
 static void

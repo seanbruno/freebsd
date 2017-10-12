@@ -45,8 +45,8 @@ struct uufsd {
 	ufs2_daddr_t d_sblock;	/* superblock location */
 	struct csum *d_sbcsum;	/* Superblock summary info */
 	caddr_t d_inoblock;	/* inode block */
-	ino_t d_inomin;		/* low inode */
-	ino_t d_inomax;		/* high inode */
+	uint32_t d_inomin;	/* low inode (not ino_t for ABI compat) */
+	uint32_t d_inomax;	/* high inode (not ino_t for ABI compat) */
 	union {
 		struct fs d_fs;	/* filesystem information */
 		char d_sb[MAXBSIZE];
@@ -143,6 +143,11 @@ void	ffs_fragacct(struct fs *, int, int32_t [], int);
 int	ffs_isblock(struct fs *, u_char *, ufs1_daddr_t);
 int	ffs_isfreeblock(struct fs *, u_char *, ufs1_daddr_t);
 void	ffs_setblock(struct fs *, u_char *, ufs1_daddr_t);
+
+/*
+ * crc32c.c
+ */
+uint32_t calculate_crc32c(uint32_t, const void *, size_t);
 
 __END_DECLS
 

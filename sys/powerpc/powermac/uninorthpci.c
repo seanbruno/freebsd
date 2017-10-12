@@ -32,11 +32,13 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/rman.h>
 
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_pci.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
-#include <dev/ofw/ofw_pci.h>
+#include <dev/ofw/ofwpci.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -46,8 +48,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/md_var.h>
 #include <machine/pio.h>
 #include <machine/resource.h>
-
-#include <sys/rman.h>
 
 #include <powerpc/powermac/uninorthvar.h>
 

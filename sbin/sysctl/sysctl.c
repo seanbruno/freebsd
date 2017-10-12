@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -114,7 +114,7 @@ static const char *ctl_typename[CTLTYPE+1] = {
 	[CTLTYPE_ULONG] = "unsigned long",
 	[CTLTYPE_U8] = "uint8_t",
 	[CTLTYPE_U16] = "uint16_t",
-	[CTLTYPE_U32] = "uint16_t",
+	[CTLTYPE_U32] = "uint32_t",
 	[CTLTYPE_U64] = "uint64_t",
 	[CTLTYPE_S8] = "int8_t",
 	[CTLTYPE_S16] = "int16_t",
@@ -623,23 +623,20 @@ S_vmtotal(size_t l2, void *p)
 	    "%hd Sleep: %hd)\n",
 	    v->t_rq, v->t_dw, v->t_pw, v->t_sl);
 	printf(
-	    "Virtual Memory:\t\t(Total: %dK Active: %dK)\n",
-	    v->t_vm * pageKilo, v->t_avm * pageKilo);
-	printf("Real Memory:\t\t(Total: %dK Active: %dK)\n",
-	    v->t_rm * pageKilo, v->t_arm * pageKilo);
-	printf("Shared Virtual Memory:\t(Total: %dK Active: %dK)\n",
-	    v->t_vmshr * pageKilo, v->t_avmshr * pageKilo);
-	printf("Shared Real Memory:\t(Total: %dK Active: %dK)\n",
-	    v->t_rmshr * pageKilo, v->t_armshr * pageKilo);
-	printf("Free Memory:\t%dK", v->t_free * pageKilo);
+	    "Virtual Memory:\t\t(Total: %jdK Active: %jdK)\n",
+	    (intmax_t)v->t_vm * pageKilo, (intmax_t)v->t_avm * pageKilo);
+	printf("Real Memory:\t\t(Total: %jdK Active: %jdK)\n",
+	    (intmax_t)v->t_rm * pageKilo, (intmax_t)v->t_arm * pageKilo);
+	printf("Shared Virtual Memory:\t(Total: %jdK Active: %jdK)\n",
+	    (intmax_t)v->t_vmshr * pageKilo, (intmax_t)v->t_avmshr * pageKilo);
+	printf("Shared Real Memory:\t(Total: %jdK Active: %jdK)\n",
+	    (intmax_t)v->t_rmshr * pageKilo, (intmax_t)v->t_armshr * pageKilo);
+	printf("Free Memory:\t%jdK", (intmax_t)v->t_free * pageKilo);
 
 	return (0);
 }
 
 #ifdef __amd64__
-#define efi_next_descriptor(ptr, size) \
-	((struct efi_md *)(((uint8_t *) ptr) + size))
-
 static int
 S_efi_map(size_t l2, void *p)
 {
@@ -928,6 +925,32 @@ show_var(int *oid, int nlen)
 		printf("%s", buf);
 		return (0);
 	}
+
+	/* don't fetch opaques that we don't know how to print */
+	if (ctltype == CTLTYPE_OPAQUE) {
+		if (strcmp(fmt, "S,clockinfo") == 0)
+			func = S_clockinfo;
+		else if (strcmp(fmt, "S,timeval") == 0)
+			func = S_timeval;
+		else if (strcmp(fmt, "S,loadavg") == 0)
+			func = S_loadavg;
+		else if (strcmp(fmt, "S,vmtotal") == 0)
+			func = S_vmtotal;
+#ifdef __amd64__
+		else if (strcmp(fmt, "S,efi_map_header") == 0)
+			func = S_efi_map;
+#endif
+#if defined(__amd64__) || defined(__i386__)
+		else if (strcmp(fmt, "S,bios_smap_xattr") == 0)
+			func = S_bios_smap_xattr;
+#endif
+		else {
+			func = NULL;
+			if (!bflag && !oflag && !xflag)
+				return (1);
+		}
+	}
+
 	/* find an estimate of how much we need for this var */
 	if (Bflag)
 		j = Bflag;
@@ -1048,24 +1071,6 @@ show_var(int *oid, int nlen)
 
 	case CTLTYPE_OPAQUE:
 		i = 0;
-		if (strcmp(fmt, "S,clockinfo") == 0)
-			func = S_clockinfo;
-		else if (strcmp(fmt, "S,timeval") == 0)
-			func = S_timeval;
-		else if (strcmp(fmt, "S,loadavg") == 0)
-			func = S_loadavg;
-		else if (strcmp(fmt, "S,vmtotal") == 0)
-			func = S_vmtotal;
-#ifdef __amd64__
-		else if (strcmp(fmt, "S,efi_map_header") == 0)
-			func = S_efi_map;
-#endif
-#if defined(__amd64__) || defined(__i386__)
-		else if (strcmp(fmt, "S,bios_smap_xattr") == 0)
-			func = S_bios_smap_xattr;
-#endif
-		else
-			func = NULL;
 		if (func) {
 			if (!nflag)
 				printf("%s%s", name, sep);

@@ -12,7 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -106,7 +106,7 @@ checkfstab(int flags, int (*docheck)(struct fstab *),
 			warnx("Can't open checklist file: %s\n", _PATH_FSTAB);
 			return (8);
 		}
-		while ((fs = getfsent()) != 0) {
+		while ((fs = getfsent()) != NULL) {
 			name = fs->fs_spec;
 			if (fs->fs_passno > passno && fs->fs_passno < nextpass)
 				nextpass = fs->fs_passno;

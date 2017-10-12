@@ -45,6 +45,7 @@
 #include <linux/kref.h>
 #include <linux/timer.h>
 #include <linux/io.h>
+#include <sys/vmem.h>
 
 #include <asm/byteorder.h>
 
@@ -130,10 +131,6 @@ struct c4iw_stats {
 	struct c4iw_stat stag;
 	struct c4iw_stat pbl;
 	struct c4iw_stat rqt;
-	u64  db_full;
-	u64  db_empty;
-	u64  db_drop;
-	u64  db_state_transitions;
 };
 
 struct c4iw_rdev {
@@ -144,8 +141,8 @@ struct c4iw_rdev {
 	unsigned long cqshift;
 	u32 cqmask;
 	struct c4iw_dev_ucontext uctx;
-	struct gen_pool *pbl_pool;
-	struct gen_pool *rqt_pool;
+	vmem_t          *rqt_arena;
+	vmem_t          *pbl_arena;
 	u32 flags;
 	struct c4iw_stats stats;
 };
@@ -157,60 +154,75 @@ static inline int c4iw_fatal_error(struct c4iw_rdev *rdev)
 
 static inline int c4iw_num_stags(struct c4iw_rdev *rdev)
 {
-	return min((int)T4_MAX_NUM_STAG, (int)(rdev->adap->vres.stag.size >> 5));
+	return (int)(rdev->adap->vres.stag.size >> 5);
 }
 
-#define C4IW_WR_TO (10*HZ)
+#define C4IW_WR_TO (60*HZ)
 
 struct c4iw_wr_wait {
 	int ret;
-	atomic_t completion;
+	struct completion completion;
 };
 
 static inline void c4iw_init_wr_wait(struct c4iw_wr_wait *wr_waitp)
 {
 	wr_waitp->ret = 0;
-	atomic_set(&wr_waitp->completion, 0);
+	init_completion(&wr_waitp->completion);
 }
 
 static inline void c4iw_wake_up(struct c4iw_wr_wait *wr_waitp, int ret)
 {
 	wr_waitp->ret = ret;
-	atomic_set(&wr_waitp->completion, 1);
-	wakeup(wr_waitp);
+	complete(&wr_waitp->completion);
 }
 
 static inline int
 c4iw_wait_for_reply(struct c4iw_rdev *rdev, struct c4iw_wr_wait *wr_waitp,
-    u32 hwtid, u32 qpid, const char *func)
+					u32 hwtid, u32 qpid, const char *func)
 {
 	struct adapter *sc = rdev->adap;
 	unsigned to = C4IW_WR_TO;
+	int ret;
+	int timedout = 0;
+	struct timeval t1, t2;
 
-	while (!atomic_read(&wr_waitp->completion)) {
-                tsleep(wr_waitp, 0, "c4iw_wait", to);
-                if (SIGPENDING(curthread)) {
-			printf("%s - Device %s not responding - "
-			    "tid %u qpid %u\n", func,
-			    device_get_nameunit(sc->dev), hwtid, qpid);
-                        if (c4iw_fatal_error(rdev)) {
-                                wr_waitp->ret = -EIO;
-                                break;
-                        }
-                        to = to << 2;
-                }
-        }
+	if (c4iw_fatal_error(rdev)) {
+		wr_waitp->ret = -EIO;
+		goto out;
+	}
+
+	getmicrotime(&t1);
+	do {
+		ret = wait_for_completion_timeout(&wr_waitp->completion, to);
+		if (!ret) {
+			getmicrotime(&t2);
+			timevalsub(&t2, &t1);
+			printf("%s - Device %s not responding after %ld.%06ld "
+			    "seconds - tid %u qpid %u\n", func,
+			    device_get_nameunit(sc->dev), t2.tv_sec, t2.tv_usec,
+			    hwtid, qpid);
+			if (c4iw_fatal_error(rdev)) {
+				wr_waitp->ret = -EIO;
+				break;
+			}
+			to = to << 2;
+			timedout = 1;
+		}
+	} while (!ret);
+
+out:
+	if (timedout) {
+		getmicrotime(&t2);
+		timevalsub(&t2, &t1);
+		printf("%s - Device %s reply after %ld.%06ld seconds - "
+		    "tid %u qpid %u\n", func, device_get_nameunit(sc->dev),
+		    t2.tv_sec, t2.tv_usec, hwtid, qpid);
+	}
 	if (wr_waitp->ret)
-		CTR4(KTR_IW_CXGBE, "%s: FW reply %d tid %u qpid %u",
-		    device_get_nameunit(sc->dev), wr_waitp->ret, hwtid, qpid);
+		CTR4(KTR_IW_CXGBE, "%p: FW reply %d tid %u qpid %u", sc,
+		    wr_waitp->ret, hwtid, qpid);
 	return (wr_waitp->ret);
 }
-
-enum db_state {
-	NORMAL = 0,
-	FLOW_CONTROL = 1,
-	RECOVERY = 2
-};
 
 struct c4iw_dev {
 	struct ib_device ibdev;
@@ -221,8 +233,6 @@ struct c4iw_dev {
 	struct idr mmidr;
 	spinlock_t lock;
 	struct dentry *debugfs_root;
-	enum db_state db_state;
-	int qpcnt;
 };
 
 static inline struct c4iw_dev *to_c4iw_dev(struct ib_device *ibdev)
@@ -435,6 +445,7 @@ struct c4iw_qp {
 	atomic_t refcnt;
 	wait_queue_head_t wait;
 	struct timer_list timer;
+	int sq_sig_all;
 };
 
 static inline struct c4iw_qp *to_c4iw_qp(struct ib_qp *ibqp)
@@ -533,6 +544,14 @@ enum c4iw_qp_state {
 	C4IW_QP_STATE_TOT
 };
 
+/*
+ * IW_CXGBE event bits.
+ * These bits are used for handling all events for a particular 'ep' serially.
+ */
+#define	C4IW_EVENT_SOCKET	0x0001
+#define	C4IW_EVENT_TIMEOUT	0x0002
+#define	C4IW_EVENT_TERM		0x0004
+
 static inline int c4iw_convert_state(enum ib_qp_state ib_state)
 {
 	switch (ib_state) {
@@ -568,6 +587,8 @@ static inline int to_ib_qp_state(int c4iw_qp_state)
 	}
 	return IB_QPS_ERR;
 }
+
+#define C4IW_DRAIN_OPCODE FW_RI_SGE_EC_CR_RETURN
 
 static inline u32 c4iw_ib_to_tpt_access(int a)
 {
@@ -712,7 +733,8 @@ enum c4iw_ep_flags {
 	ABORT_REQ_IN_PROGRESS	= 1,
 	RELEASE_RESOURCES	= 2,
 	CLOSE_SENT		= 3,
-	TIMEOUT                 = 4
+	TIMEOUT                 = 4,
+	QP_REFERENCED		= 5
 };
 
 enum c4iw_ep_history {
@@ -737,7 +759,13 @@ enum c4iw_ep_history {
         EP_DISC_ABORT           = 18,
         CONN_RPL_UPCALL         = 19,
         ACT_RETRY_NOMEM         = 20,
-        ACT_RETRY_INUSE         = 21
+        ACT_RETRY_INUSE         = 21,
+        CLOSE_CON_RPL           = 22,
+        EP_DISC_FAIL            = 24,
+        QP_REFED                = 25,
+        QP_DEREFED              = 26,
+        CM_ID_REFED             = 27,
+        CM_ID_DEREFED           = 28
 };
 
 struct c4iw_ep_common {
@@ -757,6 +785,7 @@ struct c4iw_ep_common {
         int rpl_done;
         struct thread *thread;
         struct socket *so;
+	int ep_events;
 };
 
 struct c4iw_listen_ep {
@@ -769,7 +798,6 @@ struct c4iw_ep {
 	struct c4iw_ep_common com;
 	struct c4iw_ep *parent_ep;
 	struct timer_list timer;
-	struct list_head entry;
 	unsigned int atid;
 	u32 hwtid;
 	u32 snd_seq;
@@ -921,124 +949,14 @@ extern struct cxgb4_client t4c_client;
 extern c4iw_handler_func c4iw_handlers[NUM_CPL_CMDS];
 extern int c4iw_max_read_depth;
 
-#include <sys/blist.h>
-struct gen_pool {
-        blist_t         gen_list;
-        daddr_t         gen_base;
-        int             gen_chunk_shift;
-        struct mutex      gen_lock;
-};
-
-static __inline struct gen_pool *
-gen_pool_create(daddr_t base, u_int chunk_shift, u_int len)
-{
-        struct gen_pool *gp;
-
-        gp = malloc(sizeof(struct gen_pool), M_DEVBUF, M_NOWAIT);
-        if (gp == NULL)
-                return (NULL);
-
-        memset(gp, 0, sizeof(struct gen_pool));
-        gp->gen_list = blist_create(len >> chunk_shift, M_NOWAIT);
-        if (gp->gen_list == NULL) {
-                free(gp, M_DEVBUF);
-                return (NULL);
-        }
-        blist_free(gp->gen_list, 0, len >> chunk_shift);
-        gp->gen_base = base;
-        gp->gen_chunk_shift = chunk_shift;
-        //mutex_init(&gp->gen_lock, "genpool", NULL, MTX_DUPOK|MTX_DEF);
-        mutex_init(&gp->gen_lock);
-
-        return (gp);
-}
-
-static __inline unsigned long
-gen_pool_alloc(struct gen_pool *gp, int size)
-{
-        int chunks;
-        daddr_t blkno;
-
-        chunks = (size + (1<<gp->gen_chunk_shift) - 1) >> gp->gen_chunk_shift;
-        mutex_lock(&gp->gen_lock);
-        blkno = blist_alloc(gp->gen_list, chunks);
-        mutex_unlock(&gp->gen_lock);
-
-        if (blkno == SWAPBLK_NONE)
-                return (0);
-
-        return (gp->gen_base + ((1 << gp->gen_chunk_shift) * blkno));
-}
-
-static __inline void
-gen_pool_free(struct gen_pool *gp, daddr_t address, int size)
-{
-        int chunks;
-        daddr_t blkno;
-
-        chunks = (size + (1<<gp->gen_chunk_shift) - 1) >> gp->gen_chunk_shift;
-        blkno = (address - gp->gen_base) / (1 << gp->gen_chunk_shift);
-        mutex_lock(&gp->gen_lock);
-        blist_free(gp->gen_list, blkno, chunks);
-        mutex_unlock(&gp->gen_lock);
-}
-
-static __inline void
-gen_pool_destroy(struct gen_pool *gp)
-{
-        blist_destroy(gp->gen_list);
-        free(gp, M_DEVBUF);
-}
-
 #if defined(__i386__) || defined(__amd64__)
 #define L1_CACHE_BYTES 128
 #else
 #define L1_CACHE_BYTES 32
 #endif
 
-static inline
-int idr_for_each(struct idr *idp,
-                 int (*fn)(int id, void *p, void *data), void *data)
-{
-        int n, id, max, error = 0;
-        struct idr_layer *p;
-        struct idr_layer *pa[MAX_LEVEL];
-        struct idr_layer **paa = &pa[0];
-
-        n = idp->layers * IDR_BITS;
-        p = idp->top;
-        max = 1 << n;
-
-        id = 0;
-        while (id < max) {
-                while (n > 0 && p) {
-                        n -= IDR_BITS;
-                        *paa++ = p;
-                        p = p->ary[(id >> n) & IDR_MASK];
-                }
-
-                if (p) {
-                        error = fn(id, (void *)p, data);
-                        if (error)
-                                break;
-                }
-
-                id += 1 << n;
-                while (n < fls(id)) {
-                        n += IDR_BITS;
-                        p = *--paa;
-                }
-        }
-
-        return error;
-}
-
-void c4iw_cm_init_cpl(struct adapter *);
-void c4iw_cm_term_cpl(struct adapter *);
-
 void your_reg_device(struct c4iw_dev *dev);
 
 #define SGE_CTRLQ_NUM	0
 
-extern int spg_creds;/* Status Page size in credit units(1 unit = 64) */
 #endif

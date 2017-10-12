@@ -535,8 +535,8 @@ pmcstat_image_add_symbols(struct pmcstat_image *image, Elf *e,
 	 * Allocate space for the new entries.
 	 */
 	firsttime = image->pi_symbols == NULL;
-	symptr = realloc(image->pi_symbols,
-	    sizeof(*symptr) * (image->pi_symcount + nfuncsyms));
+	symptr = reallocarray(image->pi_symbols,
+	    image->pi_symcount + nfuncsyms, sizeof(*symptr));
 	if (symptr == image->pi_symbols) /* realloc() failed. */
 		return;
 	image->pi_symbols = symptr;
@@ -587,8 +587,8 @@ pmcstat_image_add_symbols(struct pmcstat_image *image, Elf *e,
 	 * Return space to the system if there were duplicates.
 	 */
 	if (newsyms < nfuncsyms)
-		image->pi_symbols = realloc(image->pi_symbols,
-		    sizeof(*symptr) * image->pi_symcount);
+		image->pi_symbols = reallocarray(image->pi_symbols,
+		    image->pi_symcount, sizeof(*symptr));
 
 	/*
 	 * Keep the list of symbols sorted.
@@ -1372,7 +1372,7 @@ pmcstat_analyze_log(void)
 	assert(args.pa_flags & FLAG_DO_ANALYSIS);
 
 	if (elf_version(EV_CURRENT) == EV_NONE)
-		err(EX_UNAVAILABLE, "Elf library intialization failed");
+		err(EX_UNAVAILABLE, "Elf library initialization failed");
 
 	while (pmclog_read(args.pa_logparser, &ev) == 0) {
 		assert(ev.pl_state == PMCLOG_OK);

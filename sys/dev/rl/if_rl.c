@@ -276,7 +276,7 @@ DRIVER_MODULE(miibus, rl, miibus_driver, miibus_devclass, 0, 0);
 static void
 rl_eeprom_putbyte(struct rl_softc *sc, int addr)
 {
-	register int		d, i;
+	int			d, i;
 
 	d = addr | sc->rl_eecmd_read;
 
@@ -303,7 +303,7 @@ rl_eeprom_putbyte(struct rl_softc *sc, int addr)
 static void
 rl_eeprom_getword(struct rl_softc *sc, int addr, uint16_t *dest)
 {
-	register int		i;
+	int			i;
 	uint16_t		word = 0;
 
 	/* Enter EEPROM access mode. */
@@ -561,7 +561,7 @@ rl_rxfilter(struct rl_softc *sc)
 static void
 rl_reset(struct rl_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	RL_LOCK_ASSERT(sc);
 
@@ -598,7 +598,7 @@ rl_probe(device_t dev)
 		}
 	}
 	t = rl_devs;
-	for (i = 0; i < sizeof(rl_devs) / sizeof(rl_devs[0]); i++, t++) {
+	for (i = 0; i < nitems(rl_devs); i++, t++) {
 		if (vendor == t->rl_vid && devid == t->rl_did) {
 			device_set_desc(dev, t->rl_name);
 			return (BUS_PROBE_DEFAULT);
@@ -1912,7 +1912,7 @@ rl_watchdog(struct rl_softc *sc)
 static void
 rl_stop(struct rl_softc *sc)
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp = sc->rl_ifp;
 
 	RL_LOCK_ASSERT(sc);

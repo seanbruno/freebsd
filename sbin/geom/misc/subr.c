@@ -302,6 +302,7 @@ g_metadata_store(const char *name, const unsigned char *md, size_t size)
 		goto out;
 	}
 	bcopy(md, sector, size);
+	bzero(sector + size, sectorsize - size);
 	if (pwrite(fd, sector, sectorsize, mediasize - sectorsize) !=
 	    sectorsize) {
 		error = errno;
@@ -336,7 +337,7 @@ g_metadata_clear(const char *name, const char *magic)
 		goto out;
 	}
 	sectorsize = g_sectorsize(fd);
-	if (sectorsize == 0) {
+	if (sectorsize <= 0) {
 		error = errno;
 		goto out;
 	}
@@ -365,8 +366,7 @@ g_metadata_clear(const char *name, const char *magic)
 	}
 	(void)g_flush(fd);
 out:
-	if (sector != NULL)
-		free(sector);
+	free(sector);
 	g_close(fd);
 	return (error);
 }

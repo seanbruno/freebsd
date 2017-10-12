@@ -39,7 +39,10 @@
 #define	DS1307_MINS		0x01
 #define	DS1307_MINS_MASK		0x7f
 #define	DS1307_HOUR		0x02
-#define	DS1307_HOUR_MASK		0x3f
+#define	DS1307_HOUR_MASK_12HR		0x1f
+#define	DS1307_HOUR_MASK_24HR		0x3f
+#define	DS1307_HOUR_IS_PM		0x20
+#define	DS1307_HOUR_USE_AMPM		0x40
 #define	DS1307_WEEKDAY		0x03
 #define	DS1307_WEEKDAY_MASK		0x07
 #define	DS1307_DATE		0x04
@@ -50,6 +53,7 @@
 #define	DS1307_YEAR_MASK		0xff
 #define	DS1307_CONTROL		0x07
 #define	DS1307_CTRL_OUT			(1 << 7)
+#define	MCP7941X_CTRL_SQWE		(1 << 6)
 #define	DS1307_CTRL_SQWE		(1 << 4)
 #define	DS1307_CTRL_RS1			(1 << 1)
 #define	DS1307_CTRL_RS0			(1 << 0)

@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -66,11 +66,11 @@ struct proc;
 
 struct kvm_swap {
 	char	ksw_devname[32];
-	int	ksw_used;
-	int	ksw_total;
+	u_int	ksw_used;
+	u_int	ksw_total;
 	int	ksw_flags;
-	int	ksw_reserved1;
-	int	ksw_reserved2;
+	u_int	ksw_reserved1;
+	u_int	ksw_reserved2;
 };
 
 #define SWIF_DEV_PREFIX	0x0002
@@ -82,7 +82,6 @@ char	**kvm_getargv(kvm_t *, const struct kinfo_proc *, int);
 int	  kvm_getcptime(kvm_t *, long *);
 char	**kvm_getenvv(kvm_t *, const struct kinfo_proc *, int);
 char	 *kvm_geterr(kvm_t *);
-char	 *kvm_getfiles(kvm_t *, int, int, int *);
 int	  kvm_getloadavg(kvm_t *, double [], int);
 int	  kvm_getmaxcpu(kvm_t *);
 int	  kvm_getncpus(kvm_t *);

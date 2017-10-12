@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -151,7 +151,7 @@ c_entries(void)
 				 *	foo\n
 				 *	(arg1,
 				 */
-				getline();
+				get_line();
 				curline = lineno;
 				if (func_entry()) {
 					++level;
@@ -180,7 +180,7 @@ c_entries(void)
 		case ';':
 			if (t_def && level == t_level) {
 				t_def = NO;
-				getline();
+				get_line();
 				if (sp != tok)
 					*sp = EOS;
 				pfnote(tok, lineno);
@@ -225,7 +225,7 @@ c_entries(void)
 						 * get line immediately;
 						 * may change before '{'
 						 */
-						getline();
+						get_line();
 						if (str_entry(c))
 							++level;
 						break;
@@ -369,7 +369,7 @@ hash_entry(void)
 	}
 	*sp = EOS;
 	if (dflag || c == '(') {	/* only want macros */
-		getline();
+		get_line();
 		pfnote(tok, curline);
 	}
 skip:	if (c == '\n') {		/* get rid of rest of define */

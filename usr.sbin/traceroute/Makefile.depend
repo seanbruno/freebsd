@@ -9,14 +9,16 @@ DIRDEPS = \
 	include/xlocale \
 	lib/${CSU_DIR} \
 	lib/libc \
+	lib/libcapsicum \
+	lib/libcasper/libcasper \
+	lib/libcasper/services/cap_dns \
 	lib/libcompiler_rt \
 	lib/libipsec \
+	lib/libnv \
 
 
 .include <dirdeps.mk>
 
 .if ${DEP_RELDIR} == ${_DEP_RELDIR}
 # local dependencies - needed for -jN in clean tree
-version.o: version.c
-version.po: version.c
 .endif

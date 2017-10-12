@@ -31,10 +31,9 @@ static const char rcsid[] =
 #endif /* not lint */
 
 #include <sys/param.h>
-#include <sys/resource.h>
-#include <sys/time.h>
 #include <sys/types.h>
 
+#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
@@ -492,6 +491,7 @@ pw_pwcrypt(char *password)
 	char            salt[SALTSIZE + 1];
 	char		*cryptpw;
 	static char     buf[256];
+	size_t		pwlen;
 
 	/*
 	 * Calculate a salt value
@@ -503,7 +503,9 @@ pw_pwcrypt(char *password)
 	cryptpw = crypt(password, salt);
 	if (cryptpw == NULL)
 		errx(EX_CONFIG, "crypt(3) failure");
-	return strcpy(buf, cryptpw);
+	pwlen = strlcpy(buf, cryptpw, sizeof(buf));
+	assert(pwlen < sizeof(buf));
+	return (buf);
 }
 
 static char *
@@ -744,7 +746,7 @@ pw_user_next(int argc, char **argv, char *name __unused)
 	bool quiet = false;
 	uid_t next;
 
-	while ((ch = getopt(argc, argv, "Cq")) != -1) {
+	while ((ch = getopt(argc, argv, "C:q")) != -1) {
 		switch (ch) {
 		case 'C':
 			cfg = optarg;
@@ -1085,10 +1087,10 @@ split_groups(StringList **groups, char *groupsstr)
 	char *p;
 	char tok[] = ", \t";
 
+	if (*groups == NULL)
+		*groups = sl_init();
 	for (p = strtok(groupsstr, tok); p != NULL; p = strtok(NULL, tok)) {
 		grp = group_from_name_or_id(p);
-		if (*groups == NULL)
-			*groups = sl_init();
 		sl_add(*groups, newstr(grp->gr_name));
 	}
 }
@@ -1179,7 +1181,7 @@ pw_user_add(int argc, char **argv, char *arg1)
 	char line[_PASSWORD_LEN+1], path[MAXPATHLEN];
 	char *gecos, *homedir, *skel, *walk, *userid, *groupid, *grname;
 	char *default_passwd, *name, *p;
-	const char *cfg;
+	const char *cfg = NULL;
 	login_cap_t *lc;
 	FILE *pfp, *fp;
 	intmax_t id = -1;
@@ -1200,7 +1202,7 @@ pw_user_add(int argc, char **argv, char *arg1)
 		if (arg1[strspn(arg1, "0123456789")] == '\0')
 			id = pw_checkid(arg1, UID_MAX);
 		else
-			name = arg1;
+			name = pw_checkname(arg1, 0);
 	}
 
 	while ((ch = getopt(argc, argv, args)) != -1) {
@@ -1212,7 +1214,7 @@ pw_user_add(int argc, char **argv, char *arg1)
 			quiet = true;
 			break;
 		case 'n':
-			name = optarg;
+			name = pw_checkname(optarg, 0);
 			break;
 		case 'u':
 			userid = optarg;
@@ -1317,7 +1319,7 @@ pw_user_add(int argc, char **argv, char *arg1)
 
 	mix_config(cmdcnf, cnf);
 	if (default_passwd)
-		cmdcnf->default_password = boolean_val(default_passwd,
+		cmdcnf->default_password = passwd_val(default_passwd,
 		    cnf->default_password);
 	if (genconf) {
 		if (name != NULL)
@@ -1357,6 +1359,9 @@ pw_user_add(int argc, char **argv, char *arg1)
 
 	if (GETPWNAM(name) != NULL)
 		errx(EX_DATAERR, "login name `%s' already exists", name);
+
+	if (!grname)
+		grname = cmdcnf->default_group;
 
 	pwd = &fakeuser;
 	pwd->pw_name = name;
@@ -1487,7 +1492,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 	struct group *grp;
 	StringList *groups = NULL;
 	char args[] = "C:qn:u:c:d:e:p:g:G:mM:l:k:s:w:L:h:H:NPYy:";
-	const char *cfg;
+	const char *cfg = NULL;
 	char *gecos, *homedir, *grname, *name, *newname, *walk, *skel, *shell;
 	char *passwd, *class, *nispasswd;
 	login_cap_t *lc;
@@ -1495,7 +1500,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 	intmax_t id = -1;
 	int ch, fd = -1;
 	size_t i, j;
-	bool quiet, createhome, pretty, dryrun, nis, edited, docreatehome;
+	bool quiet, createhome, pretty, dryrun, nis, edited;
 	bool precrypted;
 	mode_t homemode = 0;
 	time_t expire_days, password_days, now;
@@ -1505,7 +1510,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 	passwd = NULL;
 	class = nispasswd = NULL;
 	quiet = createhome = pretty = dryrun = nis = precrypted = false;
-	edited = docreatehome = false;
+	edited = false;
 
 	if (arg1 != NULL) {
 		if (arg1[strspn(arg1, "0123456789")] == '\0')
@@ -1654,7 +1659,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 		}
 	}
 
-	if (id > 0 && pwd->pw_uid != id) {
+	if (id >= 0 && pwd->pw_uid != id) {
 		pwd->pw_uid = id;
 		edited = true;
 		if (pwd->pw_uid != 0 && strcmp(pwd->pw_name, "root") == 0)
@@ -1706,8 +1711,6 @@ pw_user_mod(int argc, char **argv, char *arg1)
 			if (!createhome)
 				warnx("WARNING: home `%s' does not exist",
 				    pwd->pw_dir);
-			else
-				docreatehome = true;
 		} else if (!S_ISDIR(st.st_mode)) {
 			warnx("WARNING: home `%s' is not a directory",
 			    pwd->pw_dir);
@@ -1719,7 +1722,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 		if (lc == NULL || login_setcryptfmt(lc, "sha512", NULL) == NULL)
 			warn("setting crypt(3) format");
 		login_close(lc);
-		cnf->default_password = boolean_val(passwd,
+		cnf->default_password = passwd_val(passwd,
 		    cnf->default_password);
 		pwd->pw_passwd = pw_password(cnf, pwd->pw_name, dryrun);
 		edited = true;
@@ -1799,7 +1802,7 @@ pw_user_mod(int argc, char **argv, char *arg1)
 	 * that this also `works' for editing users if -m is used, but
 	 * existing files will *not* be overwritten.
 	 */
-	if (PWALTDIR() != PWF_ALT && docreatehome && pwd->pw_dir &&
+	if (PWALTDIR() != PWF_ALT && createhome && pwd->pw_dir &&
 	    *pwd->pw_dir == '/' && pwd->pw_dir[1]) {
 		if (!skel)
 			skel = cnf->dotdir;

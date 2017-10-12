@@ -33,6 +33,7 @@
 
 .include <src.opts.mk>
 
+PACKAGE=runtime
 SRCS=	dhclient.c clparse.c alloc.c dispatch.c hash.c bpf.c options.c \
 	tree.c conflex.c errwarn.c inet.c packet.c convert.c tables.c \
 	parse.c privsep.c
@@ -45,8 +46,7 @@ LIBADD=	util
 
 WARNS?=	2
 
-.if ${MK_TESTS} != "no"
-SUBDIR+=    tests
-.endif
+HAS_TESTS=
+SUBDIR.${MK_TESTS}+= tests
 
 .include <bsd.prog.mk>

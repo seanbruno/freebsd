@@ -268,6 +268,13 @@ bi_load_efi_data(struct preloaded_file *kfp)
 	efisz = (sizeof(struct efi_map_header) + 0xf) & ~0xf;
 
 	/*
+	 * Assgin size of EFI_MEMORY_DESCRIPTOR to keep compatible with
+	 * u-boot which doesn't fill this value when buffer for memory
+	 * descriptors is too small (eg. 0 to obtain memory map size)
+	 */
+	mmsz = sizeof(EFI_MEMORY_DESCRIPTOR);
+
+	/*
 	 * It is possible that the first call to ExitBootServices may change
 	 * the map key. Fetch a new map key and retry ExitBootServices in that
 	 * case.
@@ -422,7 +429,7 @@ bi_load(char *args, vm_offset_t *modulep, vm_offset_t *kernendp)
 	if (dtb_size)
 		file_addmetadata(kfp, MODINFOMD_DTBP, sizeof dtbp, &dtbp);
 	else
-		pager_output("WARNING! Trying to fire up the kernel, but no "
+		printf("WARNING! Trying to fire up the kernel, but no "
 		    "device tree blob found!\n");
 #endif
 	file_addmetadata(kfp, MODINFOMD_KERNEND, sizeof kernend, &kernend);
@@ -445,7 +452,7 @@ bi_load(char *args, vm_offset_t *modulep, vm_offset_t *kernendp)
 
 	/* Do relocation fixup on metadata of each module. */
 	for (xp = file_findfile(NULL, NULL); xp != NULL; xp = xp->f_next) {
-		for (i = 0; i < sizeof mdt / sizeof mdt[0]; i++) {
+		for (i = 0; i < nitems(mdt); i++) {
 			md = file_findmetadata(xp, mdt[i]);
 			if (md) {
 				bcopy(md->md_data, &vaddr, sizeof vaddr);

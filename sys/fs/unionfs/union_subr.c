@@ -16,7 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -530,7 +530,6 @@ unionfs_relookup(struct vnode *dvp, struct vnode **vpp,
 	cn->cn_cred = cnp->cn_cred;
 
 	cn->cn_nameptr = cn->cn_pnbuf;
-	cn->cn_consume = cnp->cn_consume;
 
 	if (nameiop == DELETE)
 		cn->cn_flags |= (cnp->cn_flags & (DOWHITEOUT | SAVESTART));
@@ -918,7 +917,6 @@ unionfs_vn_create_on_upper(struct vnode **vpp, struct vnode *udvp,
 	cn.cn_thread = td;
 	cn.cn_cred = cred;
 	cn.cn_nameptr = cn.cn_pnbuf;
-	cn.cn_consume = 0;
 
 	vref(udvp);
 	if ((error = relookup(udvp, &vp, &cn)) != 0)
@@ -1184,7 +1182,6 @@ unionfs_check_rmdir(struct vnode *vp, struct ucred *cred, struct thread *td)
 			cn.cn_lkflags = LK_EXCLUSIVE;
 			cn.cn_thread = td;
 			cn.cn_cred = cred;
-			cn.cn_consume = 0;
 
 			/*
 			 * check entry in lower.
@@ -1241,7 +1238,7 @@ unionfs_checkuppervp(struct vnode *vp, char *fil, int lno)
 		    "unionfs_checkuppervp: on non-unionfs-node.\n");
 #endif
 		panic("unionfs_checkuppervp");
-	};
+	}
 #endif
 	return (unp->un_uppervp);
 }
@@ -1261,7 +1258,7 @@ unionfs_checklowervp(struct vnode *vp, char *fil, int lno)
 		    "unionfs_checklowervp: on non-unionfs-node.\n");
 #endif
 		panic("unionfs_checklowervp");
-	};
+	}
 #endif
 	return (unp->un_lowervp);
 }

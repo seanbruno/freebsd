@@ -19,6 +19,19 @@ _srcconf_included_:
 .include <bsd.compiler.mk>
 .include "kern.opts.mk"
 
+# The kernel build always occurs in the object directory which is .CURDIR.
+.if ${.MAKE.MODE:Unormal:Mmeta}
+.MAKE.MODE+=	curdirOk=yes
+.endif
+
+.if defined(NO_OBJ) || ${MK_AUTO_OBJ} == "yes"
+NO_OBJ=		t
+NO_MODULES_OBJ=	t
+.endif
+.if !defined(NO_OBJ)
+_obj=		obj
+.endif
+
 # Can be overridden by makeoptions or /etc/make.conf
 KERNEL_KO?=	kernel
 KERNEL?=	kernel
@@ -64,35 +77,12 @@ NOSTDINC= -nostdinc
 
 INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
 
-.if ${MK_FAST_DEPEND} == "no" && (make(depend) || make(kernel-depend))
-
-# This hack lets us use the ipfilter code without spamming a new
-# include path into contrib'ed source files.
-INCLUDES+= -I$S/contrib/ipfilter
-
-# ... and the same for ath
-INCLUDES+= -I$S/dev/ath -I$S/dev/ath/ath_hal -I$S/contrib/dev/ath/ath_hal
-
-# ... and the same for the NgATM stuff
-INCLUDES+= -I$S/contrib/ngatm
-
-# ... and the same for vchiq
-INCLUDES+= -I$S/contrib/vchiq
-
-# ... and the same for twa
-INCLUDES+= -I$S/dev/twa
-
-# ... and the same for cxgb and cxgbe
-INCLUDES+= -I$S/dev/cxgb -I$S/dev/cxgbe
-
-.endif
-
 CFLAGS=	${COPTFLAGS} ${DEBUG}
 CFLAGS+= ${INCLUDES} -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 CFLAGS_PARAM_INLINE_UNIT_GROWTH?=100
 CFLAGS_PARAM_LARGE_FUNCTION_GROWTH?=1000
 .if ${MACHINE_CPUARCH} == "mips"
-CFLAGS_ARCH_PARAMS?=--param max-inline-insns-single=1000
+CFLAGS_ARCH_PARAMS?=--param max-inline-insns-single=1000 -DMACHINE_ARCH='"${MACHINE_ARCH}"'
 .endif
 CFLAGS.gcc+= -fno-common -fms-extensions -finline-limit=${INLINE_LIMIT}
 CFLAGS.gcc+= --param inline-unit-growth=${CFLAGS_PARAM_INLINE_UNIT_GROWTH}
@@ -124,6 +114,10 @@ DEFINED_PROF=	${PROF}
 # can override the others.
 CFLAGS+=	${CONF_CFLAGS}
 
+.if defined(LINKER_FEATURES) && ${LINKER_FEATURES:Mbuild-id}
+LDFLAGS+=	-Wl,--build-id=sha1
+.endif
+
 # Optional linting. This can be overridden in /etc/make.conf.
 LINTFLAGS=	${LINTOBJKERNFLAGS}
 
@@ -137,7 +131,7 @@ NORMAL_M= ${AWK} -f $S/tools/makeobjops.awk ${.IMPSRC} -c ; \
 
 NORMAL_FW= uudecode -o ${.TARGET} ${.ALLSRC}
 NORMAL_FWO= ${LD} -b binary --no-warn-mismatch -d -warn-common -r \
-	-o ${.TARGET} ${.ALLSRC:M*.fw}
+	-m ${LD_EMULATION} -o ${.TARGET} ${.ALLSRC:M*.fw}
 
 # Common for dtrace / zfs
 CDDL_CFLAGS=	-DFREEBSD_NAMECACHE -nostdinc -I$S/cddl/compat/opensolaris -I$S/cddl/contrib/opensolaris/uts/common -I$S -I$S/cddl/contrib/opensolaris/common ${CFLAGS} -Wno-unknown-pragmas -Wno-missing-prototypes -Wno-undef -Wno-strict-prototypes -Wno-cast-qual -Wno-parentheses -Wno-redundant-decls -Wno-missing-braces -Wno-uninitialized -Wno-unused -Wno-inline -Wno-switch -Wno-pointer-arith -Wno-unknown-pragmas
@@ -145,7 +139,11 @@ CDDL_CFLAGS+=	-include $S/cddl/compat/opensolaris/sys/debug_compat.h
 CDDL_C=		${CC} -c ${CDDL_CFLAGS} ${WERROR} ${PROF} ${.IMPSRC}
 
 # Special flags for managing the compat compiles for ZFS
-ZFS_CFLAGS=	-DBUILDING_ZFS -I$S/cddl/contrib/opensolaris/uts/common/fs/zfs -I$S/cddl/contrib/opensolaris/uts/common/zmod -I$S/cddl/contrib/opensolaris/common/zfs ${CDDL_CFLAGS}
+ZFS_CFLAGS=	-DBUILDING_ZFS -I$S/cddl/contrib/opensolaris/uts/common/fs/zfs
+ZFS_CFLAGS+=	-I$S/cddl/contrib/opensolaris/uts/common/fs/zfs/lua
+ZFS_CFLAGS+=	-I$S/cddl/contrib/opensolaris/uts/common/zmod
+ZFS_CFLAGS+=	-I$S/cddl/contrib/opensolaris/common/zfs
+ZFS_CFLAGS+=	${CDDL_CFLAGS}
 ZFS_ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${ZFS_CFLAGS}
 ZFS_C=		${CC} -c ${ZFS_CFLAGS} ${WERROR} ${PROF} ${.IMPSRC}
 ZFS_S=		${CC} -c ${ZFS_ASM_CFLAGS} ${WERROR} ${.IMPSRC}
@@ -194,7 +192,7 @@ SYSTEM_CFILES= config.c env.c hints.c vnode_if.c
 SYSTEM_DEP= Makefile ${SYSTEM_OBJS}
 SYSTEM_OBJS= locore.o ${MDOBJS} ${OBJS}
 SYSTEM_OBJS+= ${SYSTEM_CFILES:.c=.o}
-SYSTEM_OBJS+= hack.So
+SYSTEM_OBJS+= hack.pico
 
 MD_ROOT_SIZE_CONFIGURED!=	grep MD_ROOT_SIZE opt_md.h || true ; echo
 .if ${MFS_IMAGE:Uno} != "no"
@@ -202,15 +200,16 @@ MD_ROOT_SIZE_CONFIGURED!=	grep MD_ROOT_SIZE opt_md.h || true ; echo
 SYSTEM_OBJS+= embedfs_${MFS_IMAGE:T:R}.o
 .endif
 .endif
-SYSTEM_LD= @${LD} -Bdynamic -T ${LDSCRIPT} ${_LDFLAGS} --no-warn-mismatch \
-	--warn-common --export-dynamic --dynamic-linker /red/herring \
+SYSTEM_LD= @${LD} -m ${LD_EMULATION} -Bdynamic -T ${LDSCRIPT} ${_LDFLAGS} \
+	--no-warn-mismatch --warn-common --export-dynamic \
+	--dynamic-linker /red/herring \
 	-o ${.TARGET} -X ${SYSTEM_OBJS} vers.o
 SYSTEM_LD_TAIL= @${OBJCOPY} --strip-symbol gcc2_compiled. ${.TARGET} ; \
 	${SIZE} ${.TARGET} ; chmod 755 ${.TARGET}
 SYSTEM_DEP+= ${LDSCRIPT}
 
 # Calculate path for .m files early, if needed.
-.if !defined(__MPATH)
+.if !defined(NO_MODULES) && !defined(__MPATH) && !make(install)
 __MPATH!=find ${S:tA}/ -name \*_if.m
 .endif
 
@@ -221,6 +220,7 @@ MKMODULESENV+=	MAKEOBJDIRPREFIX=${.OBJDIR}/modules KMODDIR=${KODIR}
 MKMODULESENV+=	MACHINE_CPUARCH=${MACHINE_CPUARCH}
 MKMODULESENV+=	MACHINE=${MACHINE} MACHINE_ARCH=${MACHINE_ARCH}
 MKMODULESENV+=	MODULES_EXTRA="${MODULES_EXTRA}" WITHOUT_MODULES="${WITHOUT_MODULES}"
+MKMODULESENV+=	ARCH_FLAGS="${ARCH_FLAGS}"
 .if (${KERN_IDENT} == LINT)
 MKMODULESENV+=	ALL_MODULES=LINT
 .endif
@@ -230,7 +230,9 @@ MKMODULESENV+=	MODULES_OVERRIDE="${MODULES_OVERRIDE}"
 .if defined(DEBUG)
 MKMODULESENV+=	DEBUG_FLAGS="${DEBUG}"
 .endif
+.if !defined(NO_MODULES)
 MKMODULESENV+=	__MPATH="${__MPATH}"
+.endif
 
 # Architecture and output format arguments for objdump to convert image to
 # object file
@@ -253,6 +255,8 @@ EMBEDFS_ARCH.${MACHINE_ARCH}!= sed -n '/OUTPUT_ARCH/s/.*(\(.*\)).*/\1/p' ${LDSCR
 
 EMBEDFS_FORMAT.arm?=		elf32-littlearm
 EMBEDFS_FORMAT.armv6?=		elf32-littlearm
+EMBEDFS_FORMAT.armv7?=		elf32-littlearm
+EMBEDFS_FORMAT.aarch64?=	elf64-littleaarch64
 EMBEDFS_FORMAT.mips?=		elf32-tradbigmips
 EMBEDFS_FORMAT.mipsel?=		elf32-tradlittlemips
 EMBEDFS_FORMAT.mips64?=		elf64-tradbigmips

@@ -40,6 +40,9 @@ __FBSDID("$FreeBSD$");
 #include <machine/smp.h>
 #include <machine/fdt.h>
 #include <machine/intr.h>
+#include <machine/platformvar.h>
+
+#include <arm/samsung/exynos/exynos5_mp.h>
 
 #define	EXYNOS_CHIPID		0x10000000
 
@@ -71,14 +74,7 @@ exynos_get_soc_id(void)
 }
 
 void
-platform_mp_init_secondary(void)
-{
-
-	intr_pic_init_secondary();
-}
-
-void
-platform_mp_setmaxid(void)
+exynos5_mp_setmaxid(platform_t plat)
 {
 
 	if (exynos_get_soc_id() == EXYNOS5420_SOC_ID)
@@ -89,15 +85,8 @@ platform_mp_setmaxid(void)
 	mp_maxid = mp_ncpus - 1;
 }
 
-int
-platform_mp_probe(void)
-{
-
-	return (mp_ncpus > 1);
-}
-
 void
-platform_mp_start_ap(void)
+exynos5_mp_start_ap(platform_t plat)
 {
 	bus_addr_t sysram, pmu;
 	int err, i, j;
@@ -138,14 +127,8 @@ platform_mp_start_ap(void)
 
 	dcache_wbinv_poc_all();
 
-	armv7_sev();
+	dsb();
+	sev();
 	bus_space_unmap(fdtbus_bs_tag, sysram, 0x100);
 	bus_space_unmap(fdtbus_bs_tag, pmu, 0x20000);
-}
-
-void
-platform_ipi_send(cpuset_t cpus, u_int ipi)
-{
-
-	pic_ipi_send(cpus, ipi);
 }

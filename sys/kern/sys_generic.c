@@ -15,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -89,12 +89,14 @@ __FBSDID("$FreeBSD$");
 #define	SYS_IOCTL_SMALL_SIZE	128	/* bytes */
 #define	SYS_IOCTL_SMALL_ALIGN	8	/* bytes */
 
-int iosize_max_clamp = 0;
+#ifdef __LP64__
+static int iosize_max_clamp = 0;
 SYSCTL_INT(_debug, OID_AUTO, iosize_max_clamp, CTLFLAG_RW,
     &iosize_max_clamp, 0, "Clamp max i/o size to INT_MAX");
-int devfs_iosize_max_clamp = 1;
+static int devfs_iosize_max_clamp = 1;
 SYSCTL_INT(_debug, OID_AUTO, devfs_iosize_max_clamp, CTLFLAG_RW,
     &devfs_iosize_max_clamp, 0, "Clamp max i/o size to INT_MAX for devices");
+#endif
 
 /*
  * Assert that the return value of read(2) and write(2) syscalls fits
@@ -159,6 +161,24 @@ struct selfd {
 static uma_zone_t selfd_zone;
 static struct mtx_pool *mtxpool_select;
 
+#ifdef __LP64__
+size_t
+devfs_iosize_max(void)
+{
+
+	return (devfs_iosize_max_clamp || SV_CURPROC_FLAG(SV_ILP32) ?
+	    INT_MAX : SSIZE_MAX);
+}
+
+size_t
+iosize_max(void)
+{
+
+	return (iosize_max_clamp || SV_CURPROC_FLAG(SV_ILP32) ?
+	    INT_MAX : SSIZE_MAX);
+}
+#endif
+
 #ifndef _SYS_SYSPROTO_H_
 struct read_args {
 	int	fd;
@@ -200,39 +220,37 @@ struct pread_args {
 };
 #endif
 int
-sys_pread(td, uap)
-	struct thread *td;
-	struct pread_args *uap;
+sys_pread(struct thread *td, struct pread_args *uap)
+{
+
+	return (kern_pread(td, uap->fd, uap->buf, uap->nbyte, uap->offset));
+}
+
+int
+kern_pread(struct thread *td, int fd, void *buf, size_t nbyte, off_t offset)
 {
 	struct uio auio;
 	struct iovec aiov;
 	int error;
 
-	if (uap->nbyte > IOSIZE_MAX)
+	if (nbyte > IOSIZE_MAX)
 		return (EINVAL);
-	aiov.iov_base = uap->buf;
-	aiov.iov_len = uap->nbyte;
+	aiov.iov_base = buf;
+	aiov.iov_len = nbyte;
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
-	auio.uio_resid = uap->nbyte;
+	auio.uio_resid = nbyte;
 	auio.uio_segflg = UIO_USERSPACE;
-	error = kern_preadv(td, uap->fd, &auio, uap->offset);
-	return(error);
+	error = kern_preadv(td, fd, &auio, offset);
+	return (error);
 }
 
 #if defined(COMPAT_FREEBSD6)
 int
-freebsd6_pread(td, uap)
-	struct thread *td;
-	struct freebsd6_pread_args *uap;
+freebsd6_pread(struct thread *td, struct freebsd6_pread_args *uap)
 {
-	struct pread_args oargs;
 
-	oargs.fd = uap->fd;
-	oargs.buf = uap->buf;
-	oargs.nbyte = uap->nbyte;
-	oargs.offset = uap->offset;
-	return (sys_pread(td, &oargs));
+	return (kern_pread(td, uap->fd, uap->buf, uap->nbyte, uap->offset));
 }
 #endif
 
@@ -316,7 +334,8 @@ kern_preadv(td, fd, auio, offset)
 		return (error);
 	if (!(fp->f_ops->fo_flags & DFLAG_SEEKABLE))
 		error = ESPIPE;
-	else if (offset < 0 && fp->f_vnode->v_type != VCHR)
+	else if (offset < 0 &&
+	    (fp->f_vnode == NULL || fp->f_vnode->v_type != VCHR))
 		error = EINVAL;
 	else
 		error = dofileread(td, fd, fp, auio, offset, FOF_OFFSET);
@@ -342,6 +361,8 @@ dofileread(td, fd, fp, auio, offset, flags)
 #ifdef KTRACE
 	struct uio *ktruio = NULL;
 #endif
+
+	AUDIT_ARG_FD(fd);
 
 	/* Finish zero length reads right here */
 	if (auio->uio_resid == 0) {
@@ -413,39 +434,38 @@ struct pwrite_args {
 };
 #endif
 int
-sys_pwrite(td, uap)
-	struct thread *td;
-	struct pwrite_args *uap;
+sys_pwrite(struct thread *td, struct pwrite_args *uap)
+{
+
+	return (kern_pwrite(td, uap->fd, uap->buf, uap->nbyte, uap->offset));
+}
+
+int
+kern_pwrite(struct thread *td, int fd, const void *buf, size_t nbyte,
+    off_t offset)
 {
 	struct uio auio;
 	struct iovec aiov;
 	int error;
 
-	if (uap->nbyte > IOSIZE_MAX)
+	if (nbyte > IOSIZE_MAX)
 		return (EINVAL);
-	aiov.iov_base = (void *)(uintptr_t)uap->buf;
-	aiov.iov_len = uap->nbyte;
+	aiov.iov_base = (void *)(uintptr_t)buf;
+	aiov.iov_len = nbyte;
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
-	auio.uio_resid = uap->nbyte;
+	auio.uio_resid = nbyte;
 	auio.uio_segflg = UIO_USERSPACE;
-	error = kern_pwritev(td, uap->fd, &auio, uap->offset);
+	error = kern_pwritev(td, fd, &auio, offset);
 	return(error);
 }
 
 #if defined(COMPAT_FREEBSD6)
 int
-freebsd6_pwrite(td, uap)
-	struct thread *td;
-	struct freebsd6_pwrite_args *uap;
+freebsd6_pwrite(struct thread *td, struct freebsd6_pwrite_args *uap)
 {
-	struct pwrite_args oargs;
 
-	oargs.fd = uap->fd;
-	oargs.buf = uap->buf;
-	oargs.nbyte = uap->nbyte;
-	oargs.offset = uap->offset;
-	return (sys_pwrite(td, &oargs));
+	return (kern_pwrite(td, uap->fd, uap->buf, uap->nbyte, uap->offset));
 }
 #endif
 
@@ -529,7 +549,8 @@ kern_pwritev(td, fd, auio, offset)
 		return (error);
 	if (!(fp->f_ops->fo_flags & DFLAG_SEEKABLE))
 		error = ESPIPE;
-	else if (offset < 0 && fp->f_vnode->v_type != VCHR)
+	else if (offset < 0 &&
+	    (fp->f_vnode == NULL || fp->f_vnode->v_type != VCHR))
 		error = EINVAL;
 	else
 		error = dofilewrite(td, fd, fp, auio, offset, FOF_OFFSET);
@@ -556,6 +577,7 @@ dofilewrite(td, fd, fp, auio, offset, flags)
 	struct uio *ktruio = NULL;
 #endif
 
+	AUDIT_ARG_FD(fd);
 	auio->uio_rw = UIO_WRITE;
 	auio->uio_td = td;
 	auio->uio_offset = offset;
@@ -1585,26 +1607,6 @@ pollscan(td, fds, nfd)
 }
 
 /*
- * OpenBSD poll system call.
- *
- * XXX this isn't quite a true representation..  OpenBSD uses select ops.
- */
-#ifndef _SYS_SYSPROTO_H_
-struct openbsd_poll_args {
-	struct pollfd *fds;
-	u_int	nfds;
-	int	timeout;
-};
-#endif
-int
-sys_openbsd_poll(td, uap)
-	register struct thread *td;
-	register struct openbsd_poll_args *uap;
-{
-	return (sys_poll(td, (struct poll_args *)uap));
-}
-
-/*
  * XXX This was created specifically to support netncp and netsmb.  This
  * allows the caller to specify a socket to wait for events on.  It returns
  * 0 if any events matched and an error otherwise.  There is no way to
@@ -1909,4 +1911,20 @@ selectinit(void *dummy __unused)
 	selfd_zone = uma_zcreate("selfd", sizeof(struct selfd), NULL, NULL,
 	    NULL, NULL, UMA_ALIGN_PTR, 0);
 	mtxpool_select = mtx_pool_create("select mtxpool", 128, MTX_DEF);
+}
+
+/*
+ * Set up a syscall return value that follows the convention specified for
+ * posix_* functions.
+ */
+int
+kern_posix_error(struct thread *td, int error)
+{
+
+	if (error <= 0)
+		return (error);
+	td->td_errno = error;
+	td->td_pflags |= TDP_NERRNO;
+	td->td_retval[0] = error;
+	return (0);
 }

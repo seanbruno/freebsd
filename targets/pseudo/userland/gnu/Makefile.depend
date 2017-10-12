@@ -27,7 +27,6 @@ DIRDEPS = \
 	gnu/usr.bin/binutils/libbinutils \
 	gnu/usr.bin/binutils/libiberty \
 	gnu/usr.bin/binutils/libopcodes \
-	gnu/usr.bin/binutils/objcopy \
 	gnu/usr.bin/binutils/objdump \
 	gnu/usr.bin/binutils/ranlib \
 	gnu/usr.bin/dialog \

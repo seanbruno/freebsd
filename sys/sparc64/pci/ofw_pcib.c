@@ -72,6 +72,7 @@ static device_method_t ofw_pcib_methods[] = {
 
 	/* pcib interface */
 	DEVMETHOD(pcib_route_interrupt, ofw_pcib_gen_route_interrupt),
+	DEVMETHOD(pcib_request_feature,	pcib_request_feature_allow),
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_node,	ofw_pcib_gen_get_node),
@@ -149,8 +150,7 @@ ofw_pcib_attach(device_t dev)
 
 	ofw_pcib_gen_setup(dev);
 	pcib_attach_common(dev);
-	device_add_child(dev, "pci", -1);
-	return (bus_generic_attach(dev));
+	return (pcib_attach_child(dev));
 }
 
 static void

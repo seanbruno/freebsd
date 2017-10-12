@@ -642,8 +642,8 @@ monthrangeb(int y, int m, int jd_flag, int before, int after)
 				wprintf(L"%-*ls  ",
 				    mw, wcenter(ws, year[i].name, mw));
 			else {
-				swprintf(ws, sizeof(ws), L"%-ls %d",
-				    year[i].name, M2Y(m + i));
+				swprintf(ws, sizeof(ws)/sizeof(ws[0]),
+				    L"%-ls %d", year[i].name, M2Y(m + i));
 				wprintf(L"%-*ls  ", mw, wcenter(ws1, ws, mw));
 			}
 		printf("\n");
@@ -958,7 +958,7 @@ mkweekdays(struct weekdays *wds)
 
 	for (i = 0; i != 7; i++) {
 		tm.tm_wday = (i+1) % 7;
-		wcsftime(buf, sizeof(buf), L"%a", &tm);
+		wcsftime(buf, sizeof(buf)/sizeof(buf[0]), L"%a", &tm);
 		for (len = 2; len > 0; --len) {
 			if ((width = wcswidth(buf, len)) <= 2)
 				break;
@@ -1110,7 +1110,8 @@ highlight(char *dst, char *src, int len, int *extralen)
 	static const char *term_so, *term_se;
 
 	if (first) {
-		char tbuf[1024], cbuf[512], *b;
+		static char cbuf[512];
+		char tbuf[1024], *b;
 
 		term_se = term_so = NULL;
 

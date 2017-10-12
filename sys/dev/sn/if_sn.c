@@ -283,7 +283,7 @@ sninit_locked(void *xsc)
 	CSR_WRITE_2(sc, TXMIT_CONTROL_REG_W, 0x0000);
 
 	/*
-	 * Set the control register to automatically release succesfully
+	 * Set the control register to automatically release successfully
 	 * transmitted packets (making the best use out of our limited
 	 * memory) and to enable the EPH interrupt on certain TX errors.
 	 */
@@ -393,7 +393,7 @@ startagain:
 	 * Sneak a peek at the next packet
 	 */
 	m = ifp->if_snd.ifq_head;
-	if (m == 0)
+	if (m == NULL)
 		return;
 	/*
 	 * Compute the frame length and set pad to give an overall even
@@ -509,7 +509,7 @@ startagain:
 	/*
 	 * Push out the data to the card.
 	 */
-	for (top = m; m != 0; m = m->m_next) {
+	for (top = m; m != NULL; m = m->m_next) {
 
 		/*
 		 * Push out words.
@@ -607,7 +607,7 @@ snresume(struct ifnet *ifp)
 	 * Sneak a peek at the next packet
 	 */
 	m = ifp->if_snd.ifq_head;
-	if (m == 0) {
+	if (m == NULL) {
 		if_printf(ifp, "snresume() with nothing to send\n");
 		return;
 	}
@@ -708,7 +708,7 @@ snresume(struct ifnet *ifp)
 	/*
 	 * Push out the data to the card.
 	 */
-	for (top = m; m != 0; m = m->m_next) {
+	for (top = m; m != NULL; m = m->m_next) {
 
 		/*
 		 * Push out words.
@@ -1216,8 +1216,8 @@ sn_activate(device_t dev)
 	struct sn_softc *sc = device_get_softc(dev);
 
 	sc->port_rid = 0;
-	sc->port_res = bus_alloc_resource(dev, SYS_RES_IOPORT, &sc->port_rid,
-	    0, ~0, SMC_IO_EXTENT, RF_ACTIVE);
+	sc->port_res = bus_alloc_resource_anywhere(dev, SYS_RES_IOPORT,
+	    &sc->port_rid, SMC_IO_EXTENT, RF_ACTIVE);
 	if (!sc->port_res) {
 		if (bootverbose)
 			device_printf(dev, "Cannot allocate ioport\n");

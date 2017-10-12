@@ -11,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -484,7 +484,7 @@ if_clone_list(struct if_clonereq *ifcr)
 	 * below, but that's not a major problem.  Not caping our
 	 * allocation to the number of cloners actually in the system
 	 * could be because that would let arbitrary users cause us to
-	 * allocate abritrary amounts of kernel memory.
+	 * allocate arbitrary amounts of kernel memory.
 	 */
 	buf_count = (V_if_cloners_count < ifcr->ifcr_count) ?
 	    V_if_cloners_count : ifcr->ifcr_count;

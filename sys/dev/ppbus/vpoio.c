@@ -382,7 +382,7 @@ vpoio_detect(struct vpoio_data *vpo)
 		/* The interface must be at least PS/2 or NIBBLE capable.
 		 * There is no way to know if the ZIP will work with
 		 * PS/2 mode since PS/2 and SPP both use the same connect
-		 * sequence. One must supress PS/2 with boot flags if
+		 * sequence. One must suppress PS/2 with boot flags if
 		 * PS/2 mode fails (see ppc(4)).
 		 */
 		if (ppb_set_mode(ppbus, PPB_PS2) != -1) {
@@ -680,10 +680,10 @@ vpoio_do_scsi(struct vpoio_data *vpo, int host, int target, char *command,
 		int *ret)
 {
 	device_t ppbus = device_get_parent(vpo->vpo_dev);
-	register char r;
+	char r;
 	char l, h = 0;
 	int len, error = 0;
-	register int k;
+	int k;
 
 	/*
 	 * enter disk state, allocate the ppbus

@@ -42,7 +42,6 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/bus.h>
 #include <machine/cpu.h>
-#include <machine/cpufunc.h>
 #include <machine/frame.h>
 #include <machine/intr.h>
 #include <machine/resource.h>
@@ -51,7 +50,6 @@ __FBSDID("$FreeBSD$");
 #include <arm/at91/at91_pitreg.h>
 
 #ifdef FDT
-#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 #endif
@@ -98,7 +96,7 @@ at91_pit_delay(int us)
 
 	/* Max delay ~= 260s. @ 133Mhz */
 	pit_freq = at91_master_clock / PIT_PRESCALE;
-	cnt  = ((pit_freq * us) + (mhz -1)) / mhz;
+	cnt  = howmany(pit_freq * us, mhz);
 	cnt  = (cnt <= 0) ? 1 : cnt;
 
 	while (cnt > 0) {

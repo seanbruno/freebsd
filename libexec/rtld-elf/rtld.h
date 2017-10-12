@@ -142,7 +142,8 @@ typedef struct Struct_Obj_Entry {
     TAILQ_ENTRY(Struct_Obj_Entry) next;
     char *path;			/* Pathname of underlying file (%) */
     char *origin_path;		/* Directory path of origin file */
-    int refcount;
+    int refcount;		/* DAG references */
+    int holdcount;		/* Count of transient references */
     int dl_refcount;		/* Number of times loaded by dlopen */
 
     /* These items are computed by map_object() or by digest_phdr(). */
@@ -186,6 +187,7 @@ typedef struct Struct_Obj_Entry {
     Elf_Word local_gotno;	/* Number of local GOT entries */
     Elf_Word symtabno;		/* Number of dynamic symbols */
     Elf_Word gotsym;		/* First dynamic symbol in GOT */
+    Elf_Addr *mips_pltgot;	/* Second PLT GOT */
 #endif
 #ifdef __powerpc64__
     Elf_Addr glink;		/* GLINK PLT call stub section */
@@ -265,6 +267,8 @@ typedef struct Struct_Obj_Entry {
     bool valid_hash_gnu : 1;	/* A valid GNU hash tag is available */
     bool dlopened : 1;		/* dlopen()-ed (vs. load statically) */
     bool marker : 1;		/* marker on the global obj list */
+    bool unholdfree : 1;	/* unmap upon last unhold */
+    bool doomed : 1;		/* Object cannot be referenced */
 
     struct link_map linkmap;	/* For GDB and dlinfo() */
     Objlist dldags;		/* Object belongs to these dlopened DAGs (%) */
@@ -355,6 +359,7 @@ void *malloc_aligned(size_t size, size_t align);
 void free_aligned(void *ptr);
 extern Elf_Addr _GLOBAL_OFFSET_TABLE_[];
 extern Elf_Sym sym_zero;	/* For resolving undefined weak refs. */
+extern bool ld_bind_not;
 
 void dump_relocations(Obj_Entry *);
 void dump_obj_relocations(Obj_Entry *);
@@ -367,6 +372,7 @@ void dump_Elf_Rela(Obj_Entry *, const Elf_Rela *, u_long);
 unsigned long elf_hash(const char *);
 const Elf_Sym *find_symdef(unsigned long, const Obj_Entry *,
   const Obj_Entry **, int, SymCache *, struct Struct_RtldLockState *);
+void ifunc_init(Elf_Auxinfo[__min_size(AT_COUNT)]);
 void init_pltgot(Obj_Entry *);
 void lockdflt_init(void);
 void digest_notes(Obj_Entry *, Elf_Addr, Elf_Addr);
@@ -385,6 +391,7 @@ void *allocate_module_tls(int index);
 bool allocate_tls_offset(Obj_Entry *obj);
 void free_tls_offset(Obj_Entry *obj);
 const Ver_Entry *fetch_ventry(const Obj_Entry *obj, unsigned long);
+int convert_prot(int elfflags);
 
 /*
  * MD function declarations.

@@ -234,7 +234,6 @@ rm_ifinfo(struct ifinfo *ifi)
 		TAILQ_REMOVE(&ifilist, ifi, ifi_next);
 		syslog(LOG_DEBUG, "<%s>: ifinfo (idx=%d) removed.",
 		    __func__, ifi->ifi_ifindex);
-		free(ifi);
 	} else {
 		/* recreate an empty entry */
 		update_persist_ifinfo(&ifilist, ifi->ifi_ifname);
@@ -278,6 +277,8 @@ rm_ifinfo(struct ifinfo *ifi)
 	}
 
 	syslog(LOG_DEBUG, "<%s> leave (%s).", __func__, ifi->ifi_ifname);
+	if (!ifi->ifi_persist)
+		free(ifi);
 	return (0);
 }
 
@@ -639,7 +640,7 @@ getconfig_free_pfx:
 			exit(1);
 		}
 		memset(&ndi, 0, sizeof(ndi));
-		strncpy(ndi.ifname, ifi->ifi_ifname, sizeof(ndi.ifname));
+		strlcpy(ndi.ifname, ifi->ifi_ifname, sizeof(ndi.ifname));
 		if (ioctl(s, SIOCGIFINFO_IN6, (caddr_t)&ndi) < 0)
 			syslog(LOG_INFO, "<%s> ioctl:SIOCGIFINFO_IN6 at %s: %s",
 			    __func__, ifi->ifi_ifname, strerror(errno));
@@ -1394,7 +1395,6 @@ make_packet(struct rainfo *rai)
 	ra->nd_ra_code = 0;
 	ra->nd_ra_cksum = 0;
 	ra->nd_ra_curhoplimit = (uint8_t)(0xff & rai->rai_hoplimit);
-	ra->nd_ra_flags_reserved = 0; /* just in case */
 	/*
 	 * XXX: the router preference field, which is a 2-bit field, should be
 	 * initialized before other fields.

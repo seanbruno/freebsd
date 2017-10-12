@@ -280,7 +280,7 @@ smbfs_getattr(ap)
 	smbfs_attr_cachelookup(vp, va);
 	if (np->n_flag & NOPEN)
 		np->n_size = oldsize;
-		smbfs_free_scred(scred);
+	smbfs_free_scred(scred);
 	return 0;
 }
 
@@ -341,7 +341,7 @@ smbfs_setattr(ap)
  		    default:
 			error = EINVAL;
 			goto out;
-  		};
+  		}
 		if (isreadonly) {
 			error = EROFS;
 			goto out;
@@ -907,7 +907,7 @@ smbfs_pathconf (ap)
 		*retval = 800;	/* XXX: a correct one ? */
 		break;
 	    default:
-		error = EINVAL;
+		error = vop_stdpathconf(ap);
 	}
 	return error;
 }

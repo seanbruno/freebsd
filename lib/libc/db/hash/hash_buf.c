@@ -13,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -245,7 +245,7 @@ newbuf(HTAB *hashp, u_int32_t addr, BUFHEAD *prev_bp)
 			 */
 			for (xbp = bp; xbp->ovfl;) {
 				next_xbp = xbp->ovfl;
-				xbp->ovfl = 0;
+				xbp->ovfl = NULL;
 				xbp = next_xbp;
 
 				/* Check that ovfl pointer is up date. */
@@ -350,7 +350,7 @@ __buf_free(HTAB *hashp, int do_free, int to_disk)
 void
 __reclaim_buf(HTAB *hashp, BUFHEAD *bp)
 {
-	bp->ovfl = 0;
+	bp->ovfl = NULL;
 	bp->addr = 0;
 	bp->flags = 0;
 	BUF_REMOVE(bp);

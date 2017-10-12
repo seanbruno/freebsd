@@ -36,6 +36,10 @@
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
 
+extern struct pcpu __pcpu[];
+
+#define	EARLY_COUNTER	&__pcpu[0].pc_early_dummy_counter
+
 #define	counter_enter()	do {				\
 	if ((cpu_feature & CPUID_CX8) == 0)		\
 		critical_enter();			\
@@ -45,8 +49,6 @@
 	if ((cpu_feature & CPUID_CX8) == 0)		\
 		critical_exit();			\
 } while (0)
-
-extern struct pcpu __pcpu[MAXCPU];
 
 static inline void
 counter_64_inc_8b(uint64_t *p, int64_t inc)
@@ -98,13 +100,13 @@ counter_u64_fetch_inline(uint64_t *p)
 		 * critical section as well.
 		 */
 		critical_enter();
-		for (i = 0; i < mp_ncpus; i++) {
+		CPU_FOREACH(i) {
 			res += *(uint64_t *)((char *)p +
 			    sizeof(struct pcpu) * i);
 		}
 		critical_exit();
 	} else {
-		for (i = 0; i < mp_ncpus; i++)
+		CPU_FOREACH(i)
 			res += counter_u64_read_one_8b((uint64_t *)((char *)p +
 			    sizeof(struct pcpu) * i));
 	}
@@ -144,12 +146,12 @@ counter_u64_zero_inline(counter_u64_t c)
 
 	if ((cpu_feature & CPUID_CX8) == 0) {
 		critical_enter();
-		for (i = 0; i < mp_ncpus; i++)
+		CPU_FOREACH(i)
 			*(uint64_t *)((char *)c + sizeof(struct pcpu) * i) = 0;
 		critical_exit();
 	} else {
-		smp_rendezvous(smp_no_rendevous_barrier,
-		    counter_u64_zero_one_cpu, smp_no_rendevous_barrier, c);
+		smp_rendezvous(smp_no_rendezvous_barrier,
+		    counter_u64_zero_one_cpu, smp_no_rendezvous_barrier, c);
 	}
 }
 #endif

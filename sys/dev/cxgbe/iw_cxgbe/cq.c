@@ -172,7 +172,7 @@ create_cq(struct c4iw_rdev *rdev, struct t4_cq *cq,
 
 	cq->gen = 1;
 	cq->gts = (void *)((unsigned long)rman_get_virtual(sc->regs_res) +
-	    MYPF_REG(SGE_PF_GTS));
+	    sc->sge_gts_reg);
 	cq->rdev = rdev;
 
 	if (user) {
@@ -450,6 +450,15 @@ static int poll_cq(struct t4_wq *wq, struct t4_cq *cq, struct t4_cqe *cqe,
 	}
 
 	/*
+	 * Special cqe for drain WR completions...
+	 */
+	if (CQE_OPCODE(hw_cqe) == C4IW_DRAIN_OPCODE) {
+		*cookie = CQE_DRAIN_COOKIE(hw_cqe);
+		*cqe = *hw_cqe;
+		goto skip_cqe;
+	}
+
+	/*
 	 * Gotta tweak READ completions:
 	 *	1) the cqe doesn't contain the sq_wptr from the wr.
 	 *	2) opcode not reflected from the wr.
@@ -665,6 +674,9 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		case FW_RI_FAST_REGISTER:
 			wc->opcode = IB_WC_FAST_REG_MR;
 			break;
+		case C4IW_DRAIN_OPCODE:
+			wc->opcode = IB_WC_SEND;
+			break;
 		default:
 			printf("Unexpected opcode %d "
 			       "in the CQE received for QPID = 0x%0x\n",
@@ -724,7 +736,7 @@ static int c4iw_poll_cq_one(struct c4iw_cq *chp, struct ib_wc *wc)
 		default:
 			printf("Unexpected cqe_status 0x%x for QPID = 0x%0x\n",
 			       CQE_STATUS(&cqe), CQE_QPID(&cqe));
-			ret = -EINVAL;
+			wc->status = IB_WC_FATAL_ERR;
 		}
 	}
 out:
@@ -861,6 +873,7 @@ c4iw_create_cq(struct ib_device *ibdev, struct ib_cq_init_attr *attr,
 		if (!mm2)
 			goto err4;
 
+		memset(&uresp, 0, sizeof(uresp));
 		uresp.qid_mask = rhp->rdev.cqmask;
 		uresp.cqid = chp->cq.cqid;
 		uresp.size = chp->cq.size;
@@ -871,7 +884,8 @@ c4iw_create_cq(struct ib_device *ibdev, struct ib_cq_init_attr *attr,
 		uresp.gts_key = ucontext->key;
 		ucontext->key += PAGE_SIZE;
 		spin_unlock(&ucontext->mmap_lock);
-		ret = ib_copy_to_udata(udata, &uresp, sizeof uresp);
+		ret = ib_copy_to_udata(udata, &uresp,
+					sizeof(uresp) - sizeof(uresp.reserved));
 		if (ret)
 			goto err5;
 

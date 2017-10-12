@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -32,10 +32,10 @@
  */
 #ifndef _SYS_SOCKBUF_H_
 #define _SYS_SOCKBUF_H_
-#include <sys/selinfo.h>		/* for struct selinfo */
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
 #include <sys/_sx.h>
+#include <sys/_task.h>
 
 #define	SB_MAX		(2*1024*1024)	/* default for max chars in sockbuf */
 
@@ -53,6 +53,7 @@
 #define	SB_IN_TOE	0x400		/* socket buffer is in the middle of an operation */
 #define	SB_AUTOSIZE	0x800		/* automatically size socket buffer */
 #define	SB_STOP		0x1000		/* backpressure indicator */
+#define	SB_AIO_RUNNING	0x2000		/* AIO operation running */
 
 #define	SBS_CANTSENDMORE	0x0010	/* can't send more data to peer */
 #define	SBS_CANTRCVMORE		0x0020	/* can't receive more data from peer */
@@ -62,18 +63,7 @@ struct mbuf;
 struct sockaddr;
 struct socket;
 struct thread;
-
-struct	xsockbuf {
-	u_int	sb_cc;
-	u_int	sb_hiwat;
-	u_int	sb_mbcnt;
-	u_int   sb_mcnt;
-	u_int   sb_ccnt;
-	u_int	sb_mbmax;
-	int	sb_lowat;
-	int	sb_timeo;
-	short	sb_flags;
-};
+struct selinfo;
 
 /*
  * Variables for socket buffering.
@@ -82,9 +72,9 @@ struct	xsockbuf {
  * (a) locked by SOCKBUF_LOCK().
  */
 struct	sockbuf {
-	struct	selinfo sb_sel;	/* process selecting read/write */
-	struct	mtx sb_mtx;	/* sockbuf lock */
-	struct	sx sb_sx;	/* prevent I/O interlacing */
+	struct	mtx sb_mtx;		/* sockbuf lock */
+	struct	sx sb_sx;		/* prevent I/O interlacing */
+	struct	selinfo *sb_sel;	/* process selecting read/write */
 	short	sb_state;	/* (a) socket state on sockbuf */
 #define	sb_startzero	sb_mb
 	struct	mbuf *sb_mb;	/* (a) the mbuf chain */
@@ -107,6 +97,8 @@ struct	sockbuf {
 	short	sb_flags;	/* (a) flags, see below */
 	int	(*sb_upcall)(struct socket *, void *, int); /* (a) */
 	void	*sb_upcallarg;	/* (a) */
+	TAILQ_HEAD(, kaiocb) sb_aiojobq; /* (a) pending AIO ops */
+	struct	task sb_aiotask; /* AIO task */
 };
 
 #ifdef _KERNEL
@@ -163,15 +155,13 @@ void	sbflush_locked(struct sockbuf *sb);
 void	sbrelease(struct sockbuf *sb, struct socket *so);
 void	sbrelease_internal(struct sockbuf *sb, struct socket *so);
 void	sbrelease_locked(struct sockbuf *sb, struct socket *so);
-int	sbreserve(struct sockbuf *sb, u_long cc, struct socket *so,
-	    struct thread *td);
+int	sbsetopt(struct socket *so, int cmd, u_long cc);
 int	sbreserve_locked(struct sockbuf *sb, u_long cc, struct socket *so,
 	    struct thread *td);
 struct mbuf *
 	sbsndptr(struct sockbuf *sb, u_int off, u_int len, u_int *moff);
 struct mbuf *
 	sbsndmbuf(struct sockbuf *sb, u_int off, u_int *moff);
-void	sbtoxsockbuf(struct sockbuf *sb, struct xsockbuf *xsb);
 int	sbwait(struct sockbuf *sb);
 int	sblock(struct sockbuf *sb, int flags);
 void	sbunlock(struct sockbuf *sb);

@@ -11,7 +11,7 @@
 # 2. Redistributions in binary form must reproduce the above copyright
 #    notice, this list of conditions and the following disclaimer in the
 #    documentation and/or other materials provided with the distribution.
-# 4. Neither the name of the University nor the names of its contributors
+# 3. Neither the name of the University nor the names of its contributors
 #    may be used to endorse or promote products derived from this software
 #    without specific prior written permission.
 #
@@ -73,6 +73,7 @@ ${NM} ${NMFLAGS} -go $* | sed "
 	d
 "
 
+export LC_ALL=C
 # eliminate references that can be resolved by the same library.
 if [ $(expr "$*" : '.*\.a[[:>:]]') -ne 0 ]; then
 	sort -u -o $S $S

@@ -1,6 +1,6 @@
 #!/bin/sh
 #-
-# Copyright (c) 2013-2015 The FreeBSD Foundation
+# Copyright (c) 2013-2017 The FreeBSD Foundation
 # Copyright (c) 2013 Glen Barber
 # Copyright (c) 2011 Nathan Whitehorn
 # All rights reserved.
@@ -102,6 +102,9 @@ env_setup() {
 	NODOC=
 	NOPORTS=
 
+	# Set to non-empty value to disable distributing source tree.
+	NOSRC=
+
 	# Set to non-empty value to build dvd1.iso as part of the release.
 	WITH_DVD=
 	WITH_COMPRESSED_IMAGES=
@@ -145,10 +148,11 @@ env_check() {
 		WITH_COMPRESSED_IMAGES=
 		NODOC=yes
 		case ${EMBEDDED_TARGET}:${EMBEDDED_TARGET_ARCH} in
-			arm:armv6)
-				chroot_build_release_cmd="chroot_arm_armv6_build_release"
+			arm:armv6|arm64:aarch64)
+				chroot_build_release_cmd="chroot_arm_build_release"
 				;;
 			*)
+				;;
 		esac
 	fi
 
@@ -160,15 +164,18 @@ env_check() {
 		NODOC=yes
 	fi
 
-	# If NOPORTS and/or NODOC are unset, they must not pass to make as
-	# variables.  The release makefile verifies definedness of the
+	# If NOSRC, NOPORTS and/or NODOC are unset, they must not pass to make
+	# as variables.  The release makefile verifies definedness of the
 	# NOPORTS/NODOC variables instead of their values.
-	DOCPORTS=
+	SRCDOCPORTS=
 	if [ -n "${NOPORTS}" ]; then
-		DOCPORTS="NOPORTS=yes "
+		SRCDOCPORTS="NOPORTS=yes"
 	fi
 	if [ -n "${NODOC}" ]; then
-		DOCPORTS="${DOCPORTS}NODOC=yes"
+		SRCDOCPORTS="${SRCDOCPORTS}${SRCDOCPORTS:+ }NODOC=yes"
+	fi
+	if [ -n "${NOSRC}" ]; then
+		SRCDOCPORTS="${SRCDOCPORTS}${SRCDOCPORTS:+ }NOSRC=yes"
 	fi
 
 	# The aggregated build-time flags based upon variables defined within
@@ -199,14 +206,14 @@ env_check() {
 	CHROOT_MAKEENV="${CHROOT_MAKEENV} \
 		MAKEOBJDIRPREFIX=${CHROOTDIR}/tmp/obj"
 	CHROOT_WMAKEFLAGS="${MAKE_FLAGS} ${WORLD_FLAGS} ${CONF_FILES}"
-	CHROOT_IMAKEFLAGS="${CONF_FILES}"
-	CHROOT_DMAKEFLAGS="${CONF_FILES}"
+	CHROOT_IMAKEFLAGS="${WORLD_FLAGS} ${CONF_FILES}"
+	CHROOT_DMAKEFLAGS="${WORLD_FLAGS} ${CONF_FILES}"
 	RELEASE_WMAKEFLAGS="${MAKE_FLAGS} ${WORLD_FLAGS} ${ARCH_FLAGS} \
 		${CONF_FILES}"
 	RELEASE_KMAKEFLAGS="${MAKE_FLAGS} ${KERNEL_FLAGS} \
 		KERNCONF=\"${KERNEL}\" ${ARCH_FLAGS} ${CONF_FILES}"
 	RELEASE_RMAKEFLAGS="${ARCH_FLAGS} \
-		KERNCONF=\"${KERNEL}\" ${CONF_FILES} ${DOCPORTS} \
+		KERNCONF=\"${KERNEL}\" ${CONF_FILES} ${SRCDOCPORTS} \
 		WITH_DVD=${WITH_DVD} WITH_VMIMAGES=${WITH_VMIMAGES} \
 		WITH_CLOUDWARE=${WITH_CLOUDWARE} XZ_THREADS=${XZ_THREADS}"
 
@@ -281,9 +288,15 @@ extra_chroot_setup() {
 	fi
 
 	if [ ! -z "${EMBEDDEDPORTS}" ]; then
+		_OSVERSION=$(chroot ${CHROOTDIR} /usr/bin/uname -U)
+		REVISION=$(chroot ${CHROOTDIR} make -C /usr/src/release -V REVISION)
+		BRANCH=$(chroot ${CHROOTDIR} make -C /usr/src/release -V BRANCH)
+		PBUILD_FLAGS="OSVERSION=${_OSVERSION} BATCH=yes"
+		PBUILD_FLAGS="${PBUILD_FLAGS} UNAME_r=${UNAME_r}"
+		PBUILD_FLAGS="${PBUILD_FLAGS} OSREL=${REVISION}"
 		for _PORT in ${EMBEDDEDPORTS}; do
 			eval chroot ${CHROOTDIR} make -C /usr/ports/${_PORT} \
-				BATCH=1 FORCE_PKG_REGISTER=1 install clean distclean
+				FORCE_PKG_REGISTER=1 ${PBUILD_FLAGS} install clean distclean
 		done
 	fi
 
@@ -334,13 +347,19 @@ chroot_build_release() {
 	return 0
 } # chroot_build_release()
 
-# chroot_arm_armv6_build_release(): Create arm/armv6 SD card image.
-chroot_arm_armv6_build_release() {
+# chroot_arm_build_release(): Create arm SD card image.
+chroot_arm_build_release() {
 	load_target_env
 	eval chroot ${CHROOTDIR} make -C /usr/src/release obj
-	if [ -e "${RELENGDIR}/tools/${EMBEDDED_TARGET}.subr" ]; then
-		. "${RELENGDIR}/tools/${EMBEDDED_TARGET}.subr"
-	fi
+	case ${EMBEDDED_TARGET} in
+		arm|arm64)
+			if [ -e "${RELENGDIR}/tools/arm.subr" ]; then
+				. "${RELENGDIR}/tools/arm.subr"
+			fi
+			;;
+		*)
+			;;
+	esac
 	[ ! -z "${RELEASECONF}" ] && . "${RELEASECONF}"
 	WORLDDIR="$(eval chroot ${CHROOTDIR} make -C /usr/src/release -V WORLDDIR)"
 	OBJDIR="$(eval chroot ${CHROOTDIR} make -C /usr/src/release -V .OBJDIR)"
@@ -369,7 +388,7 @@ chroot_arm_armv6_build_release() {
 		> CHECKSUM.SHA256
 
 	return 0
-} # chroot_arm_armv6_build_release()
+} # chroot_arm_build_release()
 
 # main(): Start here.
 main() {
@@ -378,7 +397,7 @@ main() {
 	while getopts c: opt; do
 		case ${opt} in
 			c)
-				RELEASECONF="${OPTARG}"
+				RELEASECONF="$(realpath ${OPTARG})"
 				;;
 			\?)
 				usage

@@ -63,6 +63,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/eventhandler.h>
 #include <sys/kernel.h>
 #include <sys/kthread.h>
+#include <sys/linker.h>
 #include <sys/lock.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
@@ -74,6 +75,7 @@ __FBSDID("$FreeBSD$");
 #include <ddb/ddb.h>
 
 #include <vm/uma.h>
+#include <crypto/intake.h>
 #include <opencrypto/cryptodev.h>
 #include <opencrypto/xform.h>			/* XXX for M_XDATA */
 
@@ -81,7 +83,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/bus.h>
 #include "cryptodev_if.h"
 
-#if defined(__i386__) || defined(__amd64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
 #include <machine/pcb.h>
 #endif
 
@@ -186,6 +188,37 @@ SYSCTL_INT(_debug, OID_AUTO, crypto_timing, CTLFLAG_RW,
 	   &crypto_timing, 0, "Enable/disable crypto timing support");
 #endif
 
+/* Try to avoid directly exposing the key buffer as a symbol */
+static struct keybuf *keybuf;
+
+static struct keybuf empty_keybuf = {
+        .kb_nents = 0
+};
+
+/* Obtain the key buffer from boot metadata */
+static void
+keybuf_init(void)
+{
+	caddr_t kmdp;
+
+	kmdp = preload_search_by_type("elf kernel");
+
+	if (kmdp == NULL)
+		kmdp = preload_search_by_type("elf64 kernel");
+
+	keybuf = (struct keybuf *)preload_search_info(kmdp,
+	    MODINFO_METADATA | MODINFOMD_KEYBUF);
+
+        if (keybuf == NULL)
+                keybuf = &empty_keybuf;
+}
+
+/* It'd be nice if we could store these in some kind of secure memory... */
+struct keybuf * get_keybuf(void) {
+
+        return (keybuf);
+}
+
 static int
 crypto_init(void)
 {
@@ -238,6 +271,9 @@ crypto_init(void)
 			error);
 		goto bad;
 	}
+
+        keybuf_init();
+
 	return 0;
 bad:
 	crypto_destroy();
@@ -282,7 +318,7 @@ crypto_destroy(void)
 
 	/* XXX flush queues??? */
 
-	/* 
+	/*
 	 * Reclaim dynamically allocated resources.
 	 */
 	if (crypto_drivers != NULL)
@@ -424,7 +460,7 @@ crypto_newsession(u_int64_t *sid, struct cryptoini *cri, int crid)
 			CRYPTDEB("dev newsession failed");
 	} else {
 		CRYPTDEB("no driver");
-		err = EINVAL;
+		err = EOPNOTSUPP;
 	}
 	CRYPTO_DRIVER_UNLOCK();
 	return err;
@@ -536,7 +572,7 @@ crypto_get_driverid(device_t dev, int flags)
 	crypto_drivers[i].cc_dev = dev;
 	crypto_drivers[i].cc_flags = flags;
 	if (bootverbose)
-		printf("crypto: assign %s driver id %u, flags %u\n",
+		printf("crypto: assign %s driver id %u, flags 0x%x\n",
 		    device_get_nameunit(dev), i, flags);
 
 	CRYPTO_DRIVER_UNLOCK();
@@ -911,7 +947,7 @@ again:
 }
 
 /*
- * Dispatch an assymetric crypto request.
+ * Dispatch an asymmetric crypto request.
  */
 static int
 crypto_kinvoke(struct cryptkop *krp, int crid)
@@ -1246,7 +1282,7 @@ crypto_proc(void)
 	u_int32_t hid;
 	int result, hint;
 
-#if defined(__i386__) || defined(__amd64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
 	fpu_kern_thread(FPU_KERN_NORMAL);
 #endif
 

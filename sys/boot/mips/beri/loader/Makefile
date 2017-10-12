@@ -72,7 +72,7 @@ CFLAGS+=	-DLOADER_BZIP2_SUPPORT
 # Enable BootForth
 BOOT_FORTH=	yes
 CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../../ficl
-CFLAGS+=	-I${.CURDIR}/../../../ficl/mips
+CFLAGS+=	-I${.CURDIR}/../../../ficl/mips64
 LIBFICL=	${.OBJDIR}/../../../ficl/libficl.a
 .endif
 
@@ -92,7 +92,7 @@ CFLAGS+=	-I${.CURDIR}/../common
 # Loader-specific MD headers
 CFLAGS+=	-I${.CURDIR}
 
-CLEANFILES+=	vers.c loader.help
+CLEANFILES+=	loader.help
 
 # Generate code appropriate for the loader environment
 CFLAGS+=	-G0					\
@@ -107,16 +107,8 @@ LDFLAGS=	-nostdlib				\
 		-L${.CURDIR}				\
 		-e __start
 
-# where to get libstand from
-CFLAGS+=	-I${.CURDIR}/../../../../../lib/libstand/
-LIBSTAND=	${.OBJDIR}/../../../../../lib/libstand/libstand.a
-
-DPADD=		${LIBFICL} ${LIBSTAND}
-LDADD=		${LIBFICL} ${LIBSTAND}
-
-vers.c: ${.CURDIR}/../../../common/newvers.sh ${.CURDIR}/version
-	sh ${.CURDIR}/../../../common/newvers.sh ${.CURDIR}/version	\
-	    ${NEWVERSWHAT}
+DPADD=		${LIBFICL} ${LIBSA}
+LDADD=		${LIBFICL} ${LIBSA}
 
 loader.help: help.common help.mips
 	cat ${.ALLSRC} | \

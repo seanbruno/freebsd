@@ -419,7 +419,7 @@ tulip_linkup(tulip_softc_t * const sc, tulip_media_t media)
      * We could set probe_timeout to 0 but setting to 3000 puts this
      * in one central place and the only matters is tulip_link is
      * followed by a tulip_timeout.  Therefore setting it should not
-     * result in aberrant behavour.
+     * result in aberrant behaviour.
      */
     sc->tulip_probe_timeout = 3000;
     sc->tulip_probe_state = TULIP_PROBE_INACTIVE;
@@ -4887,8 +4887,8 @@ tulip_pci_attach(device_t dev)
 	    rid = 0;
 	    res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
 					 RF_SHAREABLE | RF_ACTIVE);
-	    if (res == 0 || bus_setup_intr(dev, res, INTR_TYPE_NET |
-		    INTR_MPSAFE, NULL, intr_rtn, sc, &ih)) {
+	    if (res == NULL || bus_setup_intr(dev, res, INTR_TYPE_NET |
+                                              INTR_MPSAFE, NULL, intr_rtn, sc, &ih)) {
 		device_printf(dev, "couldn't map interrupt\n");
 		tulip_busdma_cleanup(sc);
 		ether_ifdetach(sc->tulip_ifp);

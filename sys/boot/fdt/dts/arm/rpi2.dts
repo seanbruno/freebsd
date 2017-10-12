@@ -30,7 +30,7 @@
 
 / {
 	model = "Raspberry Pi 2 Model B";
-	compatible = "brcm,bcm2709";
+	compatible = "brcm,bcm2836";
 
 	memreserve = <0x08000000 0x08000000>;	/* Set by VideoCore */
 
@@ -315,7 +315,7 @@
 				reg = <0x00000001>;
 				#address-cells = <1>;
 				#size-cells = <0>;
-				ethernet {
+				ethernet: ethernet {
 					compatible = "net,ethernet",
 						     "usb,device";
 					reg = <0x00000001>;
@@ -336,6 +336,11 @@
 		broadcom,height = <0>;		/* Set by VideoCore */
 		broadcom,depth = <0>;		/* Set by VideoCore */
 	};
+
+	rpi_ft5406 { 
+		compatible = "rpi,rpi-ft5406"; 
+		status = "okay"; 
+	}; 
 
 	leds {
 		compatible = "gpio-leds";
@@ -392,6 +397,7 @@
 
 	aliases {
 		uart0 = &uart0;
+		ethernet0 = &ethernet;
 	};
 
 	chosen {

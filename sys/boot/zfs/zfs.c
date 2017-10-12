@@ -126,7 +126,7 @@ zfs_close(struct open_file *f)
 {
 	struct file *fp = (struct file *)f->f_fsdata;
 
-	dnode_cache_obj = 0;
+	dnode_cache_obj = NULL;
 	f->f_fsdata = (void *)0;
 	if (fp == (struct file *)0)
 		return (0);
@@ -310,7 +310,7 @@ zfs_readdir(struct open_file *f, struct dirent *d)
 	fzap_next:
 		chunk = fp->f_seekp & (bsize - 1);
 		if (chunk == ZAP_LEAF_NUMCHUNKS(&zl)) {
-			fp->f_seekp = (fp->f_seekp & ~(bsize - 1)) + bsize;
+			fp->f_seekp = rounddown2(fp->f_seekp, bsize) + bsize;
 			chunk = 0;
 
 			/*
@@ -417,7 +417,7 @@ struct zfs_probe_args {
 };
 
 static int
-zfs_diskread(void *arg, void *buf, size_t blocks, off_t offset)
+zfs_diskread(void *arg, void *buf, size_t blocks, uint64_t offset)
 {
 	struct zfs_probe_args *ppa;
 
@@ -438,7 +438,7 @@ zfs_probe(int fd, uint64_t *pool_guid)
 	return (ret);
 }
 
-static void
+static int
 zfs_probe_partition(void *arg, const char *partname,
     const struct ptable_entry *part)
 {
@@ -450,7 +450,7 @@ zfs_probe_partition(void *arg, const char *partname,
 	/* Probe only freebsd-zfs and freebsd partitions */
 	if (part->type != PART_FREEBSD &&
 	    part->type != PART_FREEBSD_ZFS)
-		return;
+		return (0);
 
 	ppa = (struct zfs_probe_args *)arg;
 	strncpy(devname, ppa->devname, strlen(ppa->devname) - 1);
@@ -458,10 +458,10 @@ zfs_probe_partition(void *arg, const char *partname,
 	sprintf(devname, "%s%s:", devname, partname);
 	pa.fd = open(devname, O_RDONLY);
 	if (pa.fd == -1)
-		return;
+		return (0);
 	ret = zfs_probe(pa.fd, ppa->pool_guid);
 	if (ret == 0)
-		return;
+		return (0);
 	/* Do we have BSD label here? */
 	if (part->type == PART_FREEBSD) {
 		pa.devname = devname;
@@ -475,6 +475,7 @@ zfs_probe_partition(void *arg, const char *partname,
 		}
 	}
 	close(pa.fd);
+	return (0);
 }
 
 int
@@ -482,9 +483,11 @@ zfs_probe_dev(const char *devname, uint64_t *pool_guid)
 {
 	struct ptable *table;
 	struct zfs_probe_args pa;
-	off_t mediasz;
+	uint64_t mediasz;
 	int ret;
 
+	if (pool_guid)
+		*pool_guid = 0;
 	pa.fd = open(devname, O_RDONLY);
 	if (pa.fd == -1)
 		return (ENXIO);
@@ -492,6 +495,7 @@ zfs_probe_dev(const char *devname, uint64_t *pool_guid)
 	ret = zfs_probe(pa.fd, pool_guid);
 	if (ret == 0)
 		return (0);
+
 	/* Probe each partition */
 	ret = ioctl(pa.fd, DIOCGMEDIASIZE, &mediasz);
 	if (ret == 0)
@@ -507,26 +511,38 @@ zfs_probe_dev(const char *devname, uint64_t *pool_guid)
 		}
 	}
 	close(pa.fd);
+	if (pool_guid && *pool_guid == 0)
+		ret = ENXIO;
 	return (ret);
 }
 
 /*
  * Print information about ZFS pools
  */
-static void
+static int
 zfs_dev_print(int verbose)
 {
 	spa_t *spa;
 	char line[80];
+	int ret = 0;
+
+	if (STAILQ_EMPTY(&zfs_pools))
+		return (0);
+
+	printf("%s devices:", zfs_dev.dv_name);
+	if ((ret = pager_output("\n")) != 0)
+		return (ret);
 
 	if (verbose) {
-		spa_all_status();
-		return;
+		return (spa_all_status());
 	}
 	STAILQ_FOREACH(spa, &zfs_pools, spa_link) {
-		sprintf(line, "    zfs:%s\n", spa->spa_name);
-		pager_output(line);
+		snprintf(line, sizeof(line), "    zfs:%s\n", spa->spa_name);
+		ret = pager_output(line);
+		if (ret != 0)
+			break;
 	}
+	return (ret);
 }
 
 /*
@@ -800,7 +816,7 @@ zfs_bootenv(const char *name)
 }
 
 int
-zfs_belist_add(const char *name)
+zfs_belist_add(const char *name, uint64_t value __unused)
 {
 
 	/* Skip special datasets that start with a $ character */

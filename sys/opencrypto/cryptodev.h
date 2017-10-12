@@ -95,13 +95,6 @@
 #define	HMAC_IPAD_VAL			0x36
 #define	HMAC_OPAD_VAL			0x5C
 /* HMAC Key Length */
-#define	NULL_HMAC_KEY_LEN		0
-#define	MD5_HMAC_KEY_LEN		16
-#define	SHA1_HMAC_KEY_LEN		20
-#define	RIPEMD160_HMAC_KEY_LEN		20
-#define	SHA2_256_HMAC_KEY_LEN		32
-#define	SHA2_384_HMAC_KEY_LEN		48
-#define	SHA2_512_HMAC_KEY_LEN		64
 #define	AES_128_GMAC_KEY_LEN		16
 #define	AES_192_GMAC_KEY_LEN		24
 #define	AES_256_GMAC_KEY_LEN		32
@@ -211,9 +204,9 @@ struct session_op {
 	u_int32_t	mac;		/* ie. CRYPTO_MD5_HMAC */
 
 	u_int32_t	keylen;		/* cipher key */
-	caddr_t		key;
+	c_caddr_t	key;
 	int		mackeylen;	/* mac key */
-	caddr_t		mackey;
+	c_caddr_t	mackey;
 
   	u_int32_t	ses;		/* returns: session # */ 
 };
@@ -223,9 +216,9 @@ struct session2_op {
 	u_int32_t	mac;		/* ie. CRYPTO_MD5_HMAC */
 
 	u_int32_t	keylen;		/* cipher key */
-	caddr_t		key;
+	c_caddr_t	key;
 	int		mackeylen;	/* mac key */
-	caddr_t		mackey;
+	c_caddr_t	mackey;
 
   	u_int32_t	ses;		/* returns: session # */ 
 	int		crid;		/* driver id + flags (rw) */
@@ -238,11 +231,13 @@ struct crypt_op {
 #define COP_ENCRYPT	1
 #define COP_DECRYPT	2
 	u_int16_t	flags;
-#define	COP_F_BATCH	0x0008		/* Batch op if possible */
+#define	COP_F_CIPHER_FIRST	0x0001	/* Cipher before MAC. */
+#define	COP_F_BATCH		0x0008	/* Batch op if possible */
 	u_int		len;
-	caddr_t		src, dst;	/* become iov[] inside kernel */
+	c_caddr_t	src;		/* become iov[] inside kernel */
+	caddr_t		dst;
 	caddr_t		mac;		/* must be big enough for chosen MAC */
-	caddr_t		iv;
+	c_caddr_t	iv;
 };
 
 /* op and flags the same as crypt_op */
@@ -253,10 +248,11 @@ struct crypt_aead {
 	u_int		len;
 	u_int		aadlen;
 	u_int		ivlen;
-	caddr_t		src, dst;	/* become iov[] inside kernel */
-	caddr_t		aad;		/* additional authenticated data */
+	c_caddr_t	src;		/* become iov[] inside kernel */
+	caddr_t		dst;
+	c_caddr_t	aad;		/* additional authenticated data */
 	caddr_t		tag;		/* must fit for chosen TAG length */
-	caddr_t		iv;
+	c_caddr_t	iv;
 };
 
 /*
@@ -503,7 +499,7 @@ extern	int crypto_devallowsoft;	/* only use hardware crypto */
  */
 struct uio;
 extern	void cuio_copydata(struct uio* uio, int off, int len, caddr_t cp);
-extern	void cuio_copyback(struct uio* uio, int off, int len, caddr_t cp);
+extern	void cuio_copyback(struct uio* uio, int off, int len, c_caddr_t cp);
 extern	int cuio_getptr(struct uio *uio, int loc, int *off);
 extern	int cuio_apply(struct uio *uio, int off, int len,
 	    int (*f)(void *, void *, u_int), void *arg);
@@ -514,7 +510,7 @@ extern	int crypto_mbuftoiov(struct mbuf *mbuf, struct iovec **iovptr,
 	    int *cnt, int *allocated);
 
 extern	void crypto_copyback(int flags, caddr_t buf, int off, int size,
-	    caddr_t in);
+	    c_caddr_t in);
 extern	void crypto_copydata(int flags, caddr_t buf, int off, int size,
 	    caddr_t out);
 extern	int crypto_apply(int flags, caddr_t buf, int off, int len,

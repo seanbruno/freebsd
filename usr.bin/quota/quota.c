@@ -13,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -266,8 +266,8 @@ prthumanval(int len, u_int64_t bytes)
 	/*
 	 * Limit the width to 5 bytes as that is what users expect.
 	 */
-	humanize_number(buf, sizeof(buf) < 5 ? sizeof(buf) : 5, bytes, "",
-	    HN_AUTOSCALE, HN_B | HN_NOSPACE | HN_DECIMAL);
+	humanize_number(buf, MIN(sizeof(buf), 5), bytes, "",
+			HN_AUTOSCALE, HN_B | HN_NOSPACE | HN_DECIMAL);
 
 	(void)printf(" %*s", len, buf);
 }

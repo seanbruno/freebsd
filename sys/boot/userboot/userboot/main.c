@@ -31,6 +31,7 @@ __FBSDID("$FreeBSD$");
 #include <stand.h>
 #include <string.h>
 #include <setjmp.h>
+#include <sys/disk.h>
 
 #include "bootstrap.h"
 #include "disk.h"
@@ -43,17 +44,15 @@ static void userboot_zfs_probe(void);
 static int userboot_zfs_found;
 #endif
 
+/* Minimum version required */
 #define	USERBOOT_VERSION	USERBOOT_VERSION_3
 
-#define	MALLOCSZ		(10*1024*1024)
+#define	MALLOCSZ		(64*1024*1024)
 
 struct loader_callbacks *callbacks;
 void *callbacks_arg;
 
-extern char bootprog_name[];
-extern char bootprog_rev[];
-extern char bootprog_date[];
-extern char bootprog_maker[];
+extern char bootprog_info[];
 static jmp_buf jb;
 
 struct arch_switch archsw;	/* MI/MD interface boundary */
@@ -64,7 +63,7 @@ void
 delay(int usec)
 {
 
-        CALLBACK(delay, usec);
+	CALLBACK(delay, usec);
 }
 
 void
@@ -82,11 +81,11 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	const char *var;
 	int i;
 
-        if (version != USERBOOT_VERSION)
-                abort();
+	if (version < USERBOOT_VERSION)
+		abort();
 
 	callbacks = cb;
-        callbacks_arg = arg;
+	callbacks_arg = arg;
 	userboot_disk_maxunit = ndisks;
 
 	/*
@@ -95,14 +94,12 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	 */
 	setheap((void *)mallocbuf, (void *)(mallocbuf + sizeof(mallocbuf)));
 
-        /*
-         * Hook up the console
-         */
+	/*
+	 * Hook up the console
+	 */
 	cons_probe();
 
-	printf("\n");
-	printf("%s, Revision %s\n", bootprog_name, bootprog_rev);
-	printf("(%s, %s)\n", bootprog_maker, bootprog_date);
+	printf("\n%s", bootprog_info);
 #if 0
 	printf("Memory: %ld k\n", memsize() / 1024);
 #endif
@@ -129,6 +126,10 @@ loader_main(struct loader_callbacks *cb, void *arg, int version, int ndisks)
 	archsw.arch_zfs_probe = userboot_zfs_probe;
 #endif
 
+	/*
+	 * Initialise the block cache. Set the upper limit.
+	 */
+	bcache_init(32768, 512);
 	/*
 	 * March through the device switch probing for things.
 	 */
@@ -192,9 +193,9 @@ extract_currdev(void)
 	}
 
 	env_setenv("currdev", EV_VOLATILE, userboot_fmtdev(&dev),
-            userboot_setcurrdev, env_nounset);
+	    userboot_setcurrdev, env_nounset);
 	env_setenv("loaddev", EV_VOLATILE, userboot_fmtdev(&dev),
-            env_noset, env_nounset);
+	    env_noset, env_nounset);
 }
 
 #if defined(USERBOOT_ZFS_SUPPORT)
@@ -269,6 +270,16 @@ command_reloadbe(int argc, char *argv[])
 	}
 
 	return (CMD_OK);
+}
+
+uint64_t
+ldi_get_size(void *priv)
+{
+	int fd = (uintptr_t) priv;
+	uint64_t size;
+
+	ioctl(fd, DIOCGMEDIASIZE, &size);
+	return (size);
 }
 #endif /* USERBOOT_ZFS_SUPPORT */
 

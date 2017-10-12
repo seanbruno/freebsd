@@ -61,6 +61,7 @@
 #include <netinet/in.h>
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
+#include <netinet/tcp_lro.h>
 
 #include <netinet6/in6_var.h>
 #include <netinet6/nd6.h>
@@ -68,14 +69,23 @@
 #include <vm/vm.h>
 #include <vm/vm_object.h>
 #include <vm/pmap.h>
-#include <machine/pmap.h>
 
+#ifndef prefetch
 #define	prefetch(x)
+#endif
 
+#define LINUX_LIST_HEAD_INIT(name) { &(name), &(name) }
+
+#define LINUX_LIST_HEAD(name) \
+	struct list_head name = LINUX_LIST_HEAD_INIT(name)
+
+#ifndef LIST_HEAD_DEF
+#define	LIST_HEAD_DEF
 struct list_head {
 	struct list_head *next;
 	struct list_head *prev;
 };
+#endif
 
 static inline void
 INIT_LIST_HEAD(struct list_head *list)
@@ -91,12 +101,26 @@ list_empty(const struct list_head *head)
 	return (head->next == head);
 }
 
+static inline int
+list_empty_careful(const struct list_head *head)
+{
+	struct list_head *next = head->next;
+
+	return ((next == head) && (next == head->prev));
+}
+
+static inline void
+__list_del(struct list_head *prev, struct list_head *next)
+{
+	next->prev = prev;
+	WRITE_ONCE(prev->next, next);
+}
+
 static inline void
 list_del(struct list_head *entry)
 {
 
-	entry->next->prev = entry->prev;
-	entry->prev->next = entry->next;
+	__list_del(entry->prev, entry->next);
 }
 
 static inline void
@@ -106,6 +130,13 @@ list_replace(struct list_head *old, struct list_head *new)
 	new->next->prev = new;
 	new->prev = old->prev;
 	new->prev->next = new;
+}
+
+static inline void
+list_replace_init(struct list_head *old, struct list_head *new)
+{
+	list_replace(old, new);
+	INIT_LIST_HEAD(old);
 }
 
 static inline void
@@ -132,8 +163,17 @@ list_del_init(struct list_head *entry)
 #define list_first_entry(ptr, type, member) \
         list_entry((ptr)->next, type, member)
 
+#define	list_last_entry(ptr, type, member)	\
+	list_entry((ptr)->prev, type, member)
+
+#define	list_first_entry_or_null(ptr, type, member) \
+	(!list_empty(ptr) ? list_first_entry(ptr, type, member) : NULL)
+
 #define	list_next_entry(ptr, member)					\
 	list_entry(((ptr)->member.next), typeof(*(ptr)), member)
+
+#define	list_prev_entry(ptr, member)					\
+	list_entry(((ptr)->member.prev), typeof(*(ptr)), member)
 
 #define	list_for_each(p, head)						\
 	for (p = (head)->next; p != (head); p = (p)->next)
@@ -166,6 +206,11 @@ list_del_init(struct list_head *entry)
 #define	list_for_each_entry_reverse(p, h, field)			\
 	for (p = list_entry((h)->prev, typeof(*p), field); &(p)->field != (h); \
 	    p = list_entry((p)->field.prev, typeof(*p), field))
+
+#define	list_for_each_entry_safe_reverse(p, n, h, field)		\
+	for (p = list_entry((h)->prev, typeof(*p), field), 		\
+	    n = list_entry((p)->field.prev, typeof(*p), field); &(p)->field != (h); \
+	    p = n, n = list_entry(n->field.prev, typeof(*n), field))
 
 #define	list_for_each_entry_continue_reverse(p, h, field) \
 	for (p = list_entry((p)->field.prev, typeof(*p), field); &(p)->field != (h); \
@@ -435,5 +480,8 @@ static inline int list_is_last(const struct list_head *list,
 	for (pos = hlist_entry_safe((head)->first, typeof(*(pos)), member); \
 	     (pos) && ({ n = (pos)->member.next; 1; });			\
 	     pos = hlist_entry_safe(n, typeof(*(pos)), member))
+
+extern void list_sort(void *priv, struct list_head *head, int (*cmp)(void *priv,
+    struct list_head *a, struct list_head *b));
 
 #endif /* _LINUX_LIST_H_ */

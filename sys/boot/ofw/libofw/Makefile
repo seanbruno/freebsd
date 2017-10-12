@@ -9,8 +9,6 @@ SRCS=	devicename.c elf_freebsd.c ofw_console.c ofw_copy.c ofw_disk.c \
 .PATH:	${.CURDIR}/../../zfs
 SRCS+=  devicename_stubs.c
 
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
-
 # Pick up the bootstrap header for some interface items
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
 
@@ -25,7 +23,7 @@ SRCS+=		ppc64_elf_freebsd.c
 CFLAGS+= -DDISK_DEBUG
 .endif
 
-machine:
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../${MACHINE_CPUARCH}/include machine
 
 CLEANFILES+=	machine

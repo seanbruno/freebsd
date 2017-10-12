@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2010-2015 Solarflare Communications Inc.
+ * Copyright (c) 2010-2016 Solarflare Communications Inc.
  * All rights reserved.
  *
  * This software was developed in part by Philip Paeps under contract for
@@ -34,6 +34,8 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
+#include "opt_rss.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/bus.h>
@@ -57,6 +59,10 @@ __FBSDID("$FreeBSD$");
 #include <net/if_var.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
+
+#ifdef RSS
+#include <net/rss_config.h>
+#endif
 
 #include "common/efx.h"
 
@@ -127,7 +133,15 @@ sfxge_estimate_rsrc_limits(struct sfxge_softc *sc)
 	 *  - hardwire maximum RSS channels
 	 *  - administratively specified maximum RSS channels
 	 */
+#ifdef RSS
+	/*
+	 * Avoid extra limitations so that the number of queues
+	 * may be configured at administrator's will
+	 */
+	evq_max = MIN(MAX(rss_getnumbuckets(), 1), EFX_MAXRSS);
+#else
 	evq_max = MIN(mp_ncpus, EFX_MAXRSS);
+#endif
 	if (sc->max_rss_channels > 0)
 		evq_max = MIN(evq_max, sc->max_rss_channels);
 
@@ -162,6 +176,14 @@ sfxge_estimate_rsrc_limits(struct sfxge_softc *sc)
 
 	KASSERT(sc->evq_max <= evq_max,
 		("allocated more than maximum requested"));
+
+#ifdef RSS
+	if (sc->evq_max < rss_getnumbuckets())
+		device_printf(sc->dev, "The number of allocated queues (%u) "
+			      "is less than the number of RSS buckets (%u); "
+			      "performance degradation might be observed",
+			      sc->evq_max, rss_getnumbuckets());
+#endif
 
 	/*
 	 * NIC is kept initialized in the case of success to be able to
@@ -715,6 +737,16 @@ sfxge_create(struct sfxge_softc *sc)
 		goto fail3;
 	sc->enp = enp;
 
+	/* Initialize MCDI to talk to the microcontroller. */
+	DBGPRINT(sc->dev, "mcdi_init...");
+	if ((error = sfxge_mcdi_init(sc)) != 0)
+		goto fail4;
+
+	/* Probe the NIC and build the configuration data area. */
+	DBGPRINT(sc->dev, "nic_probe...");
+	if ((error = efx_nic_probe(enp)) != 0)
+		goto fail5;
+
 	if (!ISP2(sfxge_rx_ring_entries) ||
 	    (sfxge_rx_ring_entries < EFX_RXQ_MINNDESCS) ||
 	    (sfxge_rx_ring_entries > EFX_RXQ_MAXNDESCS)) {
@@ -736,16 +768,6 @@ sfxge_create(struct sfxge_softc *sc)
 		goto fail_tx_ring_entries;
 	}
 	sc->txq_entries = sfxge_tx_ring_entries;
-
-	/* Initialize MCDI to talk to the microcontroller. */
-	DBGPRINT(sc->dev, "mcdi_init...");
-	if ((error = sfxge_mcdi_init(sc)) != 0)
-		goto fail4;
-
-	/* Probe the NIC and build the configuration data area. */
-	DBGPRINT(sc->dev, "nic_probe...");
-	if ((error = efx_nic_probe(enp)) != 0)
-		goto fail5;
 
 	SYSCTL_ADD_STRING(device_get_sysctl_ctx(dev),
 			  SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
@@ -839,14 +861,14 @@ fail7:
 	efx_nvram_fini(enp);
 
 fail6:
+fail_tx_ring_entries:
+fail_rx_ring_entries:
 	efx_nic_unprobe(enp);
 
 fail5:
 	sfxge_mcdi_fini(sc);
 
 fail4:
-fail_tx_ring_entries:
-fail_rx_ring_entries:
 	sc->enp = NULL;
 	efx_nic_destroy(enp);
 	SFXGE_EFSYS_LOCK_DESTROY(&sc->enp_lock);
@@ -1147,6 +1169,11 @@ sfxge_probe(device_t dev)
 
 	if (family == EFX_FAMILY_HUNTINGTON) {
 		device_set_desc(dev, "Solarflare SFC9100 family");
+		return (0);
+	}
+
+	if (family == EFX_FAMILY_MEDFORD) {
+		device_set_desc(dev, "Solarflare SFC9200 family");
 		return (0);
 	}
 

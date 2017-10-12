@@ -77,7 +77,6 @@ __FBSDID("$FreeBSD$");
 #include <arm/at91/if_atereg.h>
 
 #ifdef FDT
-#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 #endif
@@ -651,7 +650,7 @@ ate_activate(device_t dev)
 	    ate_getaddr, &sc->tx_desc_phys, 0) != 0)
 		goto errout;
 
-	/* Initilize descriptors; mark all empty */
+	/* Initialize descriptors; mark all empty */
 	for (i = 0; i < ATE_MAX_TX_BUFFERS; i++) {
 		sc->tx_descs[i].addr =0;
 		sc->tx_descs[i].status = ETHB_TX_USED;
@@ -919,7 +918,7 @@ ate_intr(void *xsc)
 				/*
 				 * Simulate SAM9 FIRST/LAST bits for RM9200.
 				 * RM9200 EMAC has only on Rx buffer per packet.
-				 * But sometime we are handed a zero lenght packet.
+				 * But sometime we are handed a zero length packet.
 				 */
 				if ((rxdhead->status & ETH_LEN_MASK) == 0)
 					rxdhead->status = 0; /* Mark error */
@@ -980,7 +979,7 @@ ate_intr(void *xsc)
 			do {
 
 				/* Last buffer may just be 1-4 bytes of FCS so remain
-				 * may be zero for last decriptor.  */
+				 * may be zero for last descriptor.  */
 				if (remain > 0) {
 						/* Make sure we get the current bytes */
 						bus_dmamap_sync(sc->rx_tag, sc->rx_map[sc->rxhead],
@@ -989,7 +988,7 @@ ate_intr(void *xsc)
 						count = MIN(remain, sc->rx_buf_size);
 
 						/* XXX Performance robbing copy. Could
-						 * recieve directly to mbufs if not an
+						 * receive directly to mbufs if not an
 						 * RM9200. And even then we could likely
 						 * copy just the protocol headers. XXX  */
 						m_append(mb, count, sc->rx_buf[sc->rxhead]);
@@ -1184,7 +1183,7 @@ atestart_locked(struct ifnet *ifp)
 		}
 
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
-		if (m == 0)
+		if (m == NULL)
 			break;
 
 		e = bus_dmamap_load_mbuf_sg(sc->mtag, sc->tx_map[sc->txhead], m,
@@ -1468,7 +1467,7 @@ ate_miibus_readreg(device_t dev, int phy, int reg)
 	int val;
 
 	/*
-	 * XXX if we implement agressive power savings, then we need
+	 * XXX if we implement aggressive power savings, then we need
 	 * XXX to make sure that the clock to the emac is on here
 	 */
 
@@ -1488,7 +1487,7 @@ ate_miibus_writereg(device_t dev, int phy, int reg, int data)
 	struct ate_softc *sc;
 
 	/*
-	 * XXX if we implement agressive power savings, then we need
+	 * XXX if we implement aggressive power savings, then we need
 	 * XXX to make sure that the clock to the emac is on here
 	 */
 

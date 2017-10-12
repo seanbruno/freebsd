@@ -210,16 +210,13 @@ mbp_alloc_page(struct mbpool *p)
 	pg = &p->pages[p->npages];
 
 	error = bus_dmamem_alloc(p->dmat, &pg->va, BUS_DMA_NOWAIT, &pg->map);
-	if (error != 0) {
-		free(pg, M_MBPOOL);
+	if (error != 0)
 		return;
-	}
 
 	error = bus_dmamap_load(p->dmat, pg->map, pg->va, p->page_size,
 	    mbp_callback, &pg->phy, 0);
 	if (error != 0) {
 		bus_dmamem_free(p->dmat, pg->va, pg->map);
-		free(pg, M_MBPOOL);
 		return;
 	}
 
@@ -284,14 +281,14 @@ mbp_free(struct mbpool *p, void *ptr)
  * Mbuf system external mbuf free routine
  */
 void
-mbp_ext_free(struct mbuf *m, void *buf, void *arg)
+mbp_ext_free(struct mbuf *m)
 {
 
-	mbp_free(arg, buf);
+	mbp_free(m->m_ext.ext_arg2, m->m_ext.ext_arg1);
 }
 
 /*
- * Free all buffers that are marked as beeing on the card
+ * Free all buffers that are marked as being on the card
  */
 void
 mbp_card_free(struct mbpool *p)

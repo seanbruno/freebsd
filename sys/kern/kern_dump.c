@@ -49,19 +49,11 @@ __FBSDID("$FreeBSD$");
 
 CTASSERT(sizeof(struct kerneldumpheader) == 512);
 
-/*
- * Don't touch the first SIZEOF_METADATA bytes on the dump device. This
- * is to protect us from metadata and to protect metadata from us.
- */
-#define	SIZEOF_METADATA		(64*1024)
-
-#define	MD_ALIGN(x)	(((off_t)(x) + PAGE_MASK) & ~PAGE_MASK)
-#define	DEV_ALIGN(x)	(((off_t)(x) + (DEV_BSIZE-1)) & ~(DEV_BSIZE-1))
+#define	MD_ALIGN(x)	roundup2((off_t)(x), PAGE_SIZE)
 
 off_t dumplo;
 
 /* Handle buffered writes. */
-static char buffer[DEV_BSIZE];
 static size_t fragsz;
 
 struct dump_pa dump_map[DUMPSYS_MD_PA_NPAIRS];
@@ -73,7 +65,7 @@ dumpsys_gen_pa_init(void)
 	int n, idx;
 
 	bzero(dump_map, sizeof(dump_map));
-	for (n = 0; n < sizeof(dump_map) / sizeof(dump_map[0]); n++) {
+	for (n = 0; n < nitems(dump_map); n++) {
 		idx = n * 2;
 		if (dump_avail[idx] == 0 && dump_avail[idx + 1] == 0)
 			break;
@@ -119,25 +111,48 @@ dumpsys_gen_write_aux_headers(struct dumperinfo *di)
 #endif
 
 int
+dumpsys_buf_seek(struct dumperinfo *di, size_t sz)
+{
+	static uint8_t buf[DEV_BSIZE];
+	size_t nbytes;
+	int error;
+
+	bzero(buf, sizeof(buf));
+
+	while (sz > 0) {
+		nbytes = MIN(sz, sizeof(buf));
+
+		error = dump_write(di, buf, 0, dumplo, nbytes);
+		if (error)
+			return (error);
+		dumplo += nbytes;
+
+		sz -= nbytes;
+	}
+
+	return (0);
+}
+
+int
 dumpsys_buf_write(struct dumperinfo *di, char *ptr, size_t sz)
 {
 	size_t len;
 	int error;
 
 	while (sz) {
-		len = DEV_BSIZE - fragsz;
+		len = di->blocksize - fragsz;
 		if (len > sz)
 			len = sz;
-		bcopy(ptr, buffer + fragsz, len);
+		memcpy((char *)di->blockbuf + fragsz, ptr, len);
 		fragsz += len;
 		ptr += len;
 		sz -= len;
-		if (fragsz == DEV_BSIZE) {
-			error = dump_write(di, buffer, 0, dumplo,
-			    DEV_BSIZE);
+		if (fragsz == di->blocksize) {
+			error = dump_write(di, di->blockbuf, 0, dumplo,
+			    di->blocksize);
 			if (error)
 				return (error);
-			dumplo += DEV_BSIZE;
+			dumplo += di->blocksize;
 			fragsz = 0;
 		}
 	}
@@ -152,8 +167,8 @@ dumpsys_buf_flush(struct dumperinfo *di)
 	if (fragsz == 0)
 		return (0);
 
-	error = dump_write(di, buffer, 0, dumplo, DEV_BSIZE);
-	dumplo += DEV_BSIZE;
+	error = dump_write(di, di->blockbuf, 0, dumplo, di->blocksize);
+	dumplo += di->blocksize;
 	fragsz = 0;
 	return (error);
 }
@@ -174,7 +189,7 @@ dumpsys_cb_dumpdata(struct dump_pa *mdp, int seqnr, void *arg)
 
 	error = 0;	/* catch case in which chunk size is 0 */
 	counter = 0;	/* Update twiddle every 16MB */
-	va = 0;
+	va = NULL;
 	pgs = mdp->pa_size / PAGE_SIZE;
 	pa = mdp->pa_start;
 	maxdumppgs = min(di->maxiosize / PAGE_SIZE, MAXDUMPPGS);
@@ -324,27 +339,17 @@ dumpsys_generic(struct dumperinfo *di)
 	hdrsz = ehdr.e_phoff + ehdr.e_phnum * ehdr.e_phentsize;
 	fileofs = MD_ALIGN(hdrsz);
 	dumpsize += fileofs;
-	hdrgap = fileofs - DEV_ALIGN(hdrsz);
+	hdrgap = fileofs - roundup2((off_t)hdrsz, di->blocksize);
 
-	/* Determine dump offset on device. */
-	if (di->mediasize < SIZEOF_METADATA + dumpsize + sizeof(kdh) * 2) {
-		error = ENOSPC;
-		goto fail;
-	}
-	dumplo = di->mediaoffset + di->mediasize - dumpsize;
-	dumplo -= sizeof(kdh) * 2;
-
-	mkdumpheader(&kdh, KERNELDUMPMAGIC, KERNELDUMP_ARCH_VERSION, dumpsize,
-	    di->blocksize);
+	dump_init_header(di, &kdh, KERNELDUMPMAGIC, KERNELDUMP_ARCH_VERSION,
+	    dumpsize);
 
 	printf("Dumping %ju MB (%d chunks)\n", (uintmax_t)dumpsize >> 20,
 	    ehdr.e_phnum - DUMPSYS_NUM_AUX_HDRS);
 
-	/* Dump leader */
-	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
-	if (error)
+	error = dump_start(di, &kdh, &dumplo);
+	if (error != 0)
 		goto fail;
-	dumplo += sizeof(kdh);
 
 	/* Dump ELF header */
 	error = dumpsys_buf_write(di, (char*)&ehdr, sizeof(ehdr));
@@ -367,20 +372,19 @@ dumpsys_generic(struct dumperinfo *di)
 	 * boundary. We cannot use MD_ALIGN on dumplo, because we don't
 	 * care and may very well be unaligned within the dump device.
 	 */
-	dumplo += hdrgap;
+	error = dumpsys_buf_seek(di, (size_t)hdrgap);
+	if (error)
+		goto fail;
 
 	/* Dump memory chunks (updates dumplo) */
 	error = dumpsys_foreach_chunk(dumpsys_cb_dumpdata, di);
 	if (error < 0)
 		goto fail;
 
-	/* Dump trailer */
-	error = dump_write(di, &kdh, 0, dumplo, sizeof(kdh));
-	if (error)
+	error = dump_finish(di, &kdh, dumplo);
+	if (error != 0)
 		goto fail;
 
-	/* Signal completion, signoff and exit stage left. */
-	dump_write(di, NULL, 0, 0, 0);
 	printf("\nDump complete\n");
 	return (0);
 
@@ -390,7 +394,7 @@ dumpsys_generic(struct dumperinfo *di)
 
 	if (error == ECANCELED)
 		printf("\nDump aborted\n");
-	else if (error == ENOSPC)
+	else if (error == E2BIG || error == ENOSPC)
 		printf("\nDump failed. Partition too small.\n");
 	else
 		printf("\n** DUMP FAILED (ERROR %d) **\n", error);

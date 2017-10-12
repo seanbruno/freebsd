@@ -18,7 +18,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -79,7 +79,7 @@ __FBSDID("$FreeBSD$");
  *
  * If the environment variable vfs.root.mountfrom is a space separated list,
  * each list element is tried in turn and the root filesystem will be mounted
- * from the first one that suceeds.
+ * from the first one that succeeds.
  *
  * The environment variable vfs.root.mountfrom.options is a comma delimited
  * set of string mount options.  These mount options must be parseable
@@ -89,6 +89,7 @@ __FBSDID("$FreeBSD$");
 static int parse_mount(char **);
 static struct mntarg *parse_mountroot_options(struct mntarg *, const char *);
 static int sysctl_vfs_root_mount_hold(SYSCTL_HANDLER_ARGS);
+static void vfs_mountroot_wait(void);
 static int vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev);
 
 /*
@@ -131,6 +132,11 @@ static int root_mount_complete;
 static int root_mount_timeout = 3;
 TUNABLE_INT("vfs.mountroot.timeout", &root_mount_timeout);
 
+static int root_mount_always_wait = 0;
+SYSCTL_INT(_vfs, OID_AUTO, root_mount_always_wait, CTLFLAG_RDTUN,
+    &root_mount_always_wait, 0,
+    "Wait for root mount holds even if the root device already exists");
+
 SYSCTL_PROC(_vfs, OID_AUTO, root_mount_hold,
     CTLTYPE_STRING | CTLFLAG_RD | CTLFLAG_MPSAFE,
     NULL, 0, sysctl_vfs_root_mount_hold, "A",
@@ -165,9 +171,6 @@ root_mount_hold(const char *identifier)
 {
 	struct root_hold_token *h;
 
-	if (root_mounted())
-		return (NULL);
-
 	h = malloc(sizeof *h, M_DEVBUF, M_ZERO | M_WAITOK);
 	h->who = identifier;
 	mtx_lock(&root_holds_mtx);
@@ -182,6 +185,7 @@ root_mount_rel(struct root_hold_token *h)
 
 	if (h == NULL)
 		return;
+
 	mtx_lock(&root_holds_mtx);
 	LIST_REMOVE(h, list);
 	wakeup(&root_holds);
@@ -297,9 +301,9 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 	TAILQ_INSERT_TAIL(&mountlist, mpdevfs, mnt_list);
 	mtx_unlock(&mountlist_mtx);
 
-	cache_purgevfs(mporoot);
+	cache_purgevfs(mporoot, true);
 	if (mporoot != mpdevfs)
-		cache_purgevfs(mpdevfs);
+		cache_purgevfs(mpdevfs, true);
 
 	VFS_ROOT(mporoot, LK_EXCLUSIVE, &vporoot);
 
@@ -314,7 +318,7 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 	/* Set up the new rootvnode, and purge the cache */
 	mpnroot->mnt_vnodecovered = NULL;
 	set_rootvnode();
-	cache_purgevfs(rootvnode->v_mount);
+	cache_purgevfs(rootvnode->v_mount, true);
 
 	if (mporoot != mpdevfs) {
 		/* Remount old root under /.mount or /mnt */
@@ -346,9 +350,9 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		}
 		NDFREE(&nd, NDF_ONLY_PNBUF);
 
-		if (error && bootverbose)
+		if (error)
 			printf("mountroot: unable to remount previous root "
-			    "under /.mount or /mnt (error %d).\n", error);
+			    "under /.mount or /mnt (error %d)\n", error);
 	}
 
 	/* Remount devfs under /dev */
@@ -372,9 +376,9 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		} else
 			vput(vp);
 	}
-	if (error && bootverbose)
+	if (error)
 		printf("mountroot: unable to remount devfs under /dev "
-		    "(error %d).\n", error);
+		    "(error %d)\n", error);
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 
 	if (mporoot == mpdevfs) {
@@ -382,7 +386,7 @@ vfs_mountroot_shuffle(struct thread *td, struct mount *mpdevfs)
 		/* Unlink the no longer needed /dev/dev -> / symlink */
 		error = kern_unlinkat(td, AT_FDCWD, "/dev/dev",
 		    UIO_SYSSPACE, 0);
-		if (error && bootverbose)
+		if (error)
 			printf("mountroot: unable to unlink /dev/dev "
 			    "(error %d)\n", error);
 	}
@@ -487,6 +491,8 @@ parse_dir_ask(char **conf)
 	char name[80];
 	char *mnt;
 	int error;
+
+	vfs_mountroot_wait();
 
 	printf("\nLoader variables:\n");
 	parse_dir_ask_printenv("vfs.root.mountfrom");
@@ -958,10 +964,11 @@ vfs_mountroot_wait_if_neccessary(const char *fs, const char *dev)
 
 	/*
 	 * In case of ZFS and NFS we don't have a way to wait for
-	 * specific device.
+	 * specific device.  Also do the wait if the user forced that
+	 * behaviour by setting vfs.root_mount_always_wait=1.
 	 */
 	if (strcmp(fs, "zfs") == 0 || strstr(fs, "nfs") != NULL ||
-	    dev[0] == '\0') {
+	    dev[0] == '\0' || root_mount_always_wait != 0) {
 		vfs_mountroot_wait();
 		return (0);
 	}

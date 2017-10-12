@@ -79,7 +79,7 @@ __FBSDID("$FreeBSD$");
  *
  * The XenStore is ASCII string based, and has a structure and semantics
  * similar to a filesystem.  There are files and directories, the directories
- * able to contain files or other directories.  The depth of the hierachy
+ * able to contain files or other directories.  The depth of the hierarchy
  * is only limited by the XenStore's maximum path length.
  *
  * The communication channel between the XenStore service and other
@@ -1110,7 +1110,7 @@ xs_identify(driver_t *driver, device_t parent)
 }
 
 /**
- * Probe for the existance of the XenStore.
+ * Probe for the existence of the XenStore.
  *
  * \param dev
  */
@@ -1699,3 +1699,20 @@ xs_unregister_watch(struct xs_watch *watch)
 		sx_xunlock(&xs.xenwatch_mutex);
 	}
 }
+
+void
+xs_lock(void)
+{
+
+	sx_xlock(&xs.request_mutex);
+	return;
+}
+
+void
+xs_unlock(void)
+{
+
+	sx_xunlock(&xs.request_mutex);
+	return;
+}
+

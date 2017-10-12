@@ -75,7 +75,7 @@ __FBSDID("$FreeBSD$");
  * Columbia University, New York City
  */
 /*
- * The 3c90x series chips use a bus-master DMA interface for transfering
+ * The 3c90x series chips use a bus-master DMA interface for transferring
  * packets to and from the controller chip. Some of the "vortex" cards
  * (3c59x) also supported a bus master mode, however for those chips
  * you could only DMA packets to/from a contiguous memory buffer. For
@@ -353,7 +353,7 @@ xl_dma_map_addr(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 static void
 xl_wait(struct xl_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	for (i = 0; i < XL_TIMEOUT; i++) {
 		if ((CSR_READ_2(sc, XL_STATUS) & XL_STAT_CMDBUSY) == 0)
@@ -836,7 +836,7 @@ xl_setmode(struct xl_softc *sc, int media)
 static void
 xl_reset(struct xl_softc *sc)
 {
-	register int		i;
+	int			i;
 
 	XL_LOCK_ASSERT(sc);
 
@@ -3153,7 +3153,7 @@ xl_watchdog(struct xl_softc *sc)
 static void
 xl_stop(struct xl_softc *sc)
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp = sc->xl_ifp;
 
 	XL_LOCK_ASSERT(sc);

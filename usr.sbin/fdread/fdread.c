@@ -170,7 +170,7 @@ doread(int fd, FILE *of, const char *_devname)
 	secsize = 128 << fdt.secsize;
 	tracksize = fdt.sectrac * secsize;
 	mediasize = tracksize * fdt.tracks * fdt.heads;
-	if ((trackbuf = malloc(tracksize)) == 0)
+	if ((trackbuf = malloc(tracksize)) == NULL)
 		errx(EX_TEMPFAIL, "out of memory");
 
 	if (!quiet)
@@ -184,6 +184,7 @@ doread(int fd, FILE *of, const char *_devname)
 		if (rv == 0) {
 			/* EOF? */
 			warnx("premature EOF after %u bytes", nbytes);
+			free(trackbuf);
 			return (EX_OK);
 		}
 		if ((unsigned)rv == tracksize) {
@@ -215,6 +216,7 @@ doread(int fd, FILE *of, const char *_devname)
 						if (!quiet)
 							putc('\n', stderr);
 						perror("non-IO error");
+						free(trackbuf);
 						return (EX_OSERR);
 					}
 					if (ioctl(fd, FD_GSTAT, &fdcs) == -1)
@@ -233,6 +235,7 @@ doread(int fd, FILE *of, const char *_devname)
 					if (!recover) {
 						if (!quiet)
 							putc('\n', stderr);
+						free(trackbuf);
 						return (EX_IOERR);
 					}
 					memset(trackbuf, fillbyte, secsize);
@@ -284,6 +287,7 @@ doread(int fd, FILE *of, const char *_devname)
 			continue;
 		}
 	}
+	free(trackbuf);
 	if (!quiet) {
 		putc('\n', stderr);
 		if (nerrs)

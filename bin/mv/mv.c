@@ -13,7 +13,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -286,6 +286,7 @@ fastcopy(const char *from, const char *to, struct stat *sbp)
 	}
 	if (bp == NULL && (bp = malloc((size_t)blen)) == NULL) {
 		warnx("malloc(%u) failed", blen);
+		(void)close(from_fd);
 		return (1);
 	}
 	while ((to_fd =

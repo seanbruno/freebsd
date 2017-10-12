@@ -49,9 +49,7 @@ struct fdc_data {
 #define FDC_KTHREAD_ALIVE	0x2000 /* worker thread is alive */
 	struct	fd_data *fd;	/* The active drive */
 	int	retry;
-#ifndef PC98
 	int	fdout;		/* mirror of the w/o digital output reg */
-#endif
 	u_int	status[7];	/* copy of the registers */
 	enum	fdc_type fdct;	/* chip version of FDC */
 	int	fdc_errs;	/* number of logged errors */
@@ -66,7 +64,7 @@ struct fdc_data {
 	bus_space_handle_t ioh[FDC_MAXREG];
 	int	ioff[FDC_MAXREG];
 	void	*fdc_intr;
-	struct	device *fdc_dev;
+	device_t fdc_dev;
 	struct mtx fdc_mtx;
 	struct proc *fdc_thread;
 };
@@ -83,6 +81,7 @@ __BUS_ACCESSOR(fdc, fdtype, FDC, FDTYPE, int);
 
 void fdc_release_resources(struct fdc_data *);
 int fdc_attach(device_t);
+void fdc_start_worker(device_t);
 int fdc_hints_probe(device_t);
 int fdc_detach(device_t dev);
 device_t fdc_add_child(device_t, const char *, int);

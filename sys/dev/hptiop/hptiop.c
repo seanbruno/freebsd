@@ -330,7 +330,7 @@ static void hptiop_request_callback_itl(struct hpt_iop_hba * hba,
 							u_int32_t index)
 {
 	struct hpt_iop_srb *srb;
-	struct hpt_iop_request_scsi_command *req=0;
+	struct hpt_iop_request_scsi_command *req=NULL;
 	union ccb *ccb;
 	u_int8_t *cdb;
 	u_int32_t result, temp, dxfer;
@@ -1241,7 +1241,7 @@ static int hptiop_post_ioctl_command_mv(struct hpt_iop_hba *hba,
 	req->header.result = IOP_RESULT_PENDING;
 	req->header.flags = IOP_REQUEST_FLAG_OUTPUT_CONTEXT;
 	size = req->header.size >> 8;
-	size = size > 3 ? 3 : size;
+	size = imin(3, size);
 	req_phy = hba->ctlcfgcmd_phy | MVIOP_MU_QUEUE_ADDR_HOST_BIT | size;
 	hptiop_mv_inbound_write(req_phy, hba);
 
@@ -2365,9 +2365,9 @@ static void hptiop_action(struct cam_sim *sim, union ccb *ccb)
 		cpi->initiator_id = hba->max_devices;
 		cpi->base_transfer_speed = 3300;
 
-		strncpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
-		strncpy(cpi->hba_vid, "HPT   ", HBA_IDLEN);
-		strncpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
+		strlcpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
+		strlcpy(cpi->hba_vid, "HPT   ", HBA_IDLEN);
+		strlcpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
 		cpi->transport = XPORT_SPI;
 		cpi->transport_version = 2;
 		cpi->protocol = PROTO_SCSI;
@@ -2408,7 +2408,7 @@ static void hptiop_post_req_itl(struct hpt_iop_hba *hba,
 		iop_req32 = BUS_SPACE_RD4_ITL(inbound_queue);
 
 		if (iop_req32 == IOPMU_QUEUE_EMPTY) {
-			device_printf(hba->pcidev, "invaild req offset\n");
+			device_printf(hba->pcidev, "invalid req offset\n");
 			ccb->ccb_h.status = CAM_BUSY;
 			bus_dmamap_unload(hba->io_dmat, srb->dma_map);
 			hptiop_free_srb(hba, srb);
@@ -2561,7 +2561,7 @@ static void hptiop_post_req_mv(struct hpt_iop_hba *hba,
 	size = req->header.size >> 8;
 	hptiop_mv_inbound_write(req_phy
 			| MVIOP_MU_QUEUE_ADDR_HOST_BIT
-			| (size > 3 ? 3 : size), hba);
+			| imin(3, size), hba);
 }
 
 static void hptiop_post_req_mvfrey(struct hpt_iop_hba *hba,

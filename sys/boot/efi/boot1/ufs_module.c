@@ -56,9 +56,9 @@ dskread(void *buf, u_int64_t lba, int nblk)
 	    devinfo->dev->Media->MediaId, lba, size, buf);
 
 	if (status != EFI_SUCCESS) {
-		DPRINTF("dskread: failed dev: %p, id: %u, lba: %lu, size: %d, "
+		DPRINTF("dskread: failed dev: %p, id: %u, lba: %ju, size: %d, "
 		    "status: %lu\n", devinfo->dev,
-		    devinfo->dev->Media->MediaId, lba, size,
+		    devinfo->dev->Media->MediaId, (uintmax_t)lba, size,
 		    EFI_ERROR_CODE(status));
 		return (-1);
 	}
@@ -101,8 +101,13 @@ load(const char *filepath, dev_info_t *dev, void **bufp, size_t *bufsize)
 	ssize_t read;
 	void *buf;
 
-	DPRINTF("Loading '%s' from %s\n", filepath, devpath_str(dev->devpath));
-
+#ifdef EFI_DEBUG
+	{
+		CHAR16 *text = efi_devpath_name(dev->devpath);
+		DPRINTF("Loading '%s' from %S\n", filepath, text);
+		efi_free_devpath_name(text);
+	}
+#endif
 	if (init_dev(dev) < 0) {
 		DPRINTF("Failed to init device\n");
 		return (EFI_UNSUPPORTED);
@@ -118,7 +123,7 @@ load(const char *filepath, dev_info_t *dev, void **bufp, size_t *bufsize)
 		return (EFI_INVALID_PARAMETER);
 	}
 
-	if ((status = bs->AllocatePool(EfiLoaderData, size, &buf)) !=
+	if ((status = BS->AllocatePool(EfiLoaderData, size, &buf)) !=
 	    EFI_SUCCESS) {
 		printf("Failed to allocate read buffer %zu for '%s' (%lu)\n",
 		    size, filepath, EFI_ERROR_CODE(status));
@@ -129,7 +134,7 @@ load(const char *filepath, dev_info_t *dev, void **bufp, size_t *bufsize)
 	if ((size_t)read != size) {
 		printf("Failed to read '%s' (%zd != %zu)\n", filepath, read,
 		    size);
-		(void)bs->FreePool(buf);
+		(void)BS->FreePool(buf);
 		return (EFI_INVALID_PARAMETER);
 	}
 
@@ -142,7 +147,7 @@ load(const char *filepath, dev_info_t *dev, void **bufp, size_t *bufsize)
 }
 
 static void
-status()
+status(void)
 {
 	int i;
 	dev_info_t *dev;
@@ -164,7 +169,7 @@ status()
 }
 
 static dev_info_t *
-_devices()
+_devices(void)
 {
 
 	return (devices);

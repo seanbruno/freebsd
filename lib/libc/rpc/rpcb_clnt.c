@@ -500,6 +500,7 @@ try_nconf:
 			}
 		}
 		if (tmpnconf == NULL) {
+			endnetconfig(nc_handle);
 			rpc_createerr.cf_stat = RPC_UNKNOWNPROTO;
 			mutex_unlock(&loopnconf_lock);
 			return (NULL);
@@ -1010,7 +1011,7 @@ done:
  *
  * Assuming that the address is all properly allocated
  */
-int
+bool_t
 rpcb_getaddr(rpcprog_t program, rpcvers_t version, const struct netconfig *nconf,
     struct netbuf *address, const char *host)
 {

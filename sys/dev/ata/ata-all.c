@@ -426,7 +426,7 @@ ata_default_registers(device_t dev)
 void
 ata_udelay(int interval)
 {
-    /* for now just use DELAY, the timer/sleep subsytems are not there yet */
+    /* for now just use DELAY, the timer/sleep subsystems are not there yet */
     if (1 || interval < (1000000/hz) || ata_delayed_attach)
 	DELAY(interval);
     else
@@ -962,6 +962,12 @@ ata_check_ids(device_t dev, union ccb *ccb)
 		xpt_done(ccb);
 		return (-1);
 	}
+	/*
+	 * It's a programming error to see AUXILIARY register requests.
+	 */
+	KASSERT(ccb->ccb_h.func_code != XPT_ATA_IO ||
+	    ((ccb->ataio.ata_flags & ATA_FLAG_AUX) == 0),
+	    ("AUX register unsupported"));
 	return (0);
 }
 
@@ -1007,10 +1013,6 @@ ataaction(struct cam_sim *sim, union ccb *ccb)
 		}
 		ata_cam_begin_transaction(dev, ccb);
 		return;
-	case XPT_EN_LUN:		/* Enable LUN as a target */
-	case XPT_TARGET_IO:		/* Execute target I/O request */
-	case XPT_ACCEPT_TARGET_IO:	/* Accept Host Target Mode CDB */
-	case XPT_CONT_TARGET_IO:	/* Continue Host Target I/O Connection*/
 	case XPT_ABORT:			/* Abort the specified CCB */
 		/* XXX Implement */
 		ccb->ccb_h.status = CAM_REQ_INVALID;
@@ -1161,9 +1163,9 @@ ataaction(struct cam_sim *sim, union ccb *ccb)
 			cpi->base_transfer_speed = 150000;
 		else
 			cpi->base_transfer_speed = 3300;
-		strncpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
-		strncpy(cpi->hba_vid, "ATA", HBA_IDLEN);
-		strncpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
+		strlcpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
+		strlcpy(cpi->hba_vid, "ATA", HBA_IDLEN);
+		strlcpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
 		cpi->unit_number = cam_sim_unit(sim);
 		if (ch->flags & ATA_SATA)
 			cpi->transport = XPORT_SATA;

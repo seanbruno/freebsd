@@ -3,8 +3,11 @@
 
 .include <src.opts.mk>
 
+PACKAGE=runtime-manuals
+
 #MISSING: eqnchar.7 ms.7 term.7
 MAN=	adding_user.7 \
+	arch.7 \
 	ascii.7 \
 	bsd.snmpmod.mk.7 \
 	build.7 \
@@ -40,7 +43,7 @@ MLINKS+= c99.7 c89.7
 MLINKS+= c99.7 c90.7
 
 .if ${MK_TESTS} != "no"
-ATF=	${.CURDIR}/../../../contrib/atf
+ATF=	${SRCTOP}/contrib/atf
 .PATH:	${ATF}/doc
 MAN+=	atf.7
 

@@ -6,11 +6,12 @@ MAN=
 MK_SSP=		no
 
 SHLIB_NAME=	userboot.so
-NO_CTF=		yes
+MK_CTF=		no
 STRIP=
 LIBDIR=		/boot
 
 SRCS=		autoload.c
+SRCS+=		bcache.c
 SRCS+=		biossmap.c
 SRCS+=		bootinfo.c
 SRCS+=		bootinfo32.c
@@ -31,24 +32,20 @@ CFLAGS+=	-Wall
 CFLAGS+=	-I${.CURDIR}/..
 CFLAGS+=	-I${.CURDIR}/../../common
 CFLAGS+=	-I${.CURDIR}/../../..
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand
 CFLAGS+=	-ffreestanding -I.
+
+CWARNFLAGS.main.c += -Wno-implicit-function-declaration
 
 LDFLAGS+=	-nostdlib -Wl,-Bsymbolic
 
 NEWVERSWHAT=	"User boot" ${MACHINE_CPUARCH}
 
-vers.c: ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
-	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
-
-CLEANFILES=	vers.c
-
 .if ${MK_FORTH} != "no"
 BOOT_FORTH=	yes
-CFLAGS+=        -DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/i386
+CFLAGS+=        -DBOOT_FORTH -I${.CURDIR}/../../ficl
+CFLAGS+=        -I${.CURDIR}/../../ficl/i386
 CFLAGS+=	-DBF_DICTSIZE=15000
 LIBFICL=	${.OBJDIR}/../ficl/libficl.a
-LIBSTAND=	${.OBJDIR}/../libstand/libstand.a
 .endif
 
 .if ${MK_ZFS} != "no"
@@ -61,7 +58,7 @@ LIBZFSBOOT=	${.OBJDIR}/../zfs/libzfsboot.a
 .include	"${.CURDIR}/../../common/Makefile.inc"
 CFLAGS+=	-I${.CURDIR}/../../common
 CFLAGS+=	-I.
-DPADD+=		${LIBFICL} ${LIBZFSBOOT} ${LIBSTAND} 
-LDADD+=		${LIBFICL} ${LIBZFSBOOT} ${LIBSTAND}
+DPADD+=		${LIBFICL} ${LIBZFSBOOT} ${LIBSA} 
+LDADD+=		${LIBFICL} ${LIBZFSBOOT} ${LIBSA}
 
 .include <bsd.lib.mk>

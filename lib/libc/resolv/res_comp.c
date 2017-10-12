@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  * 
@@ -72,7 +72,6 @@ static const char rcsid[] = "$Id: res_comp.c,v 1.5 2005/07/28 06:51:50 marka Exp
 __FBSDID("$FreeBSD$");
 
 #include "port_before.h"
-#include <sys/types.h>
 #include <sys/param.h>
 #include <netinet/in.h>
 #include <arpa/nameser.h>
@@ -86,7 +85,7 @@ __FBSDID("$FreeBSD$");
 /*%
  * Expand compressed domain name 'src' to full domain name.
  *
- * \li 'msg' is a pointer to the begining of the message,
+ * \li 'msg' is a pointer to the beginning of the message,
  * \li 'eom' points to the first location after the message,
  * \li 'dst' is a pointer to a buffer of size 'dstsiz' for the result.
  * \li Return size of compressed name or -1 if there was an error.

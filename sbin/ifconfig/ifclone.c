@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -87,6 +87,7 @@ list_cloners(void)
 
 	putchar('\n');
 	free(buf);
+	close(s);
 }
 
 struct clone_defcb {
@@ -144,11 +145,12 @@ ifclonecreate(int s, void *arg)
 	}
 
 	/*
-	 * If we get a different name back than we put in, print it.
+	 * If we get a different name back than we put in, update record and
+	 * indicate it should be printed later.
 	 */
 	if (strncmp(name, ifr.ifr_name, sizeof(name)) != 0) {
 		strlcpy(name, ifr.ifr_name, sizeof(name));
-		printf("%s\n", name);
+		printifname = 1;
 	}
 }
 
@@ -161,7 +163,7 @@ DECL_CMD_FUNC(clone_create, arg, d)
 static
 DECL_CMD_FUNC(clone_destroy, arg, d)
 {
-	(void) strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	(void) strlcpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 	if (ioctl(s, SIOCIFDESTROY, &ifr) < 0)
 		err(1, "SIOCIFDESTROY");
 }

@@ -50,6 +50,7 @@
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/string.h>
+#include <linux/wait.h>
 #include <netinet/tcp.h>
 #include <sys/mutex.h>
 
@@ -79,7 +80,6 @@ struct iwcm_listen_work {
 static LIST_HEAD(listen_port_list);
 
 static DEFINE_MUTEX(listen_port_mutex);
-static DEFINE_MUTEX(dequeue_mutex);
 
 struct listen_port_info {
 	struct list_head list;
@@ -267,9 +267,16 @@ static void add_ref(struct iw_cm_id *cm_id)
 static void rem_ref(struct iw_cm_id *cm_id)
 {
 	struct iwcm_id_private *cm_id_priv;
+	int cb_destroy;
+
 	cm_id_priv = container_of(cm_id, struct iwcm_id_private, id);
-	if (iwcm_deref_id(cm_id_priv) &&
-	    test_bit(IWCM_F_CALLBACK_DESTROY, &cm_id_priv->flags)) {
+
+	/*
+	 * Test bit before deref in case the cm_id gets freed on another
+	 * thread.
+	 */
+	cb_destroy = test_bit(IWCM_F_CALLBACK_DESTROY, &cm_id_priv->flags);
+	if (iwcm_deref_id(cm_id_priv) && cb_destroy) {
 		BUG_ON(!list_empty(&cm_id_priv->work_list));
 		free_cm_id(cm_id_priv);
 	}
@@ -410,33 +417,19 @@ dequeue_socket(struct socket *head)
 {
 	struct socket *so;
 	struct sockaddr_in *remote;
+	int error;
 
-	ACCEPT_LOCK();
-	so = TAILQ_FIRST(&head->so_comp);
-	if (!so) {
-		ACCEPT_UNLOCK();
-		return NULL;
-	}
-
-	SOCK_LOCK(so);
-	/*
-	 * Before changing the flags on the socket, we have to bump the
-	 * reference count.  Otherwise, if the protocol calls sofree(),
-	 * the socket will be released due to a zero refcount.
-	 */
-	soref(so);
-	TAILQ_REMOVE(&head->so_comp, so, so_list);
-	head->so_qlen--;
-	so->so_qstate &= ~SQ_COMP;
-	so->so_head = NULL;
-	so->so_state |= SS_NBIO;
-	SOCK_UNLOCK(so);
-	ACCEPT_UNLOCK();
+	SOLISTEN_LOCK(head);
+	error = solisten_dequeue(head, &so, SOCK_NONBLOCK);
+	if (error == EWOULDBLOCK)
+		return (NULL);
+	remote = NULL;
 	soaccept(so, (struct sockaddr **)&remote);
 
 	free(remote, M_SONAME);
 	return so;
 }
+
 static void
 iw_so_event_handler(struct work_struct *_work)
 {
@@ -455,7 +448,6 @@ iw_so_event_handler(struct work_struct *_work)
 		kfree(work);
 		return;
 	}
-	mutex_lock(&dequeue_mutex);
 
 	/* Dequeue & process  all new 'so' connection requests for this cmid */
 	while ((so = dequeue_socket(work->cm_id->so)) != NULL) {
@@ -475,24 +467,21 @@ iw_so_event_handler(struct work_struct *_work)
 		}
 	}
 err:
-	mutex_unlock(&dequeue_mutex);
 	kfree(work);
 #endif
 	return;
 }
+
 static int
 iw_so_upcall(struct socket *parent_so, void *arg, int waitflag)
 {
 	struct iwcm_listen_work *work;
-	struct socket *so;
 	struct iw_cm_id *cm_id = arg;
 
-	mutex_lock(&dequeue_mutex);
 	/* check whether iw_so_event_handler() already dequeued this 'so' */
-	so = TAILQ_FIRST(&parent_so->so_comp);
-	if (!so)
+	if (TAILQ_EMPTY(&parent_so->sol_comp))
 		return SU_OK;
-	work = kzalloc(sizeof(*work), M_NOWAIT);
+	work = kzalloc(sizeof(*work), waitflag);
 	if (!work)
 		return -ENOMEM;
 	work->cm_id = cm_id;
@@ -500,21 +489,24 @@ iw_so_upcall(struct socket *parent_so, void *arg, int waitflag)
 	INIT_WORK(&work->work, iw_so_event_handler);
 	queue_work(iwcm_wq, &work->work);
 
-	mutex_unlock(&dequeue_mutex);
 	return SU_OK;
 }
 
-static void
-iw_init_sock(struct iw_cm_id *cm_id)
+static int
+iw_create_listen(struct iw_cm_id *cm_id, int backlog)
 {
 	struct sockopt sopt;
 	struct socket *so = cm_id->so;
 	int on = 1;
+	int rc;
 
-	SOCK_LOCK(so);
-	soupcall_set(so, SO_RCV, iw_so_upcall, cm_id);
+	rc = -solisten(cm_id->so, backlog, curthread);
+	if (rc != 0)
+		return (rc);
+	SOLISTEN_LOCK(so);
+	solisten_upcall_set(so, iw_so_upcall, cm_id);
 	so->so_state |= SS_NBIO;
-	SOCK_UNLOCK(so);
+	SOLISTEN_UNLOCK(so);
 	sopt.sopt_dir = SOPT_SET;
 	sopt.sopt_level = IPPROTO_TCP;
 	sopt.sopt_name = TCP_NODELAY;
@@ -522,47 +514,18 @@ iw_init_sock(struct iw_cm_id *cm_id)
 	sopt.sopt_valsize = sizeof(on);
 	sopt.sopt_td = NULL;
 	sosetopt(so, &sopt);
-}
-
-static int
-iw_close_socket(struct iw_cm_id *cm_id, int close)
-{
-	struct socket *so = cm_id->so;
-	int rc;
-
-
-	SOCK_LOCK(so);
-	soupcall_clear(so, SO_RCV);
-	SOCK_UNLOCK(so);
-
-	if (close)
-		rc = soclose(so);
-	else
-		rc = soshutdown(so, SHUT_WR | SHUT_RD);
-
-	cm_id->so = NULL;
-
-	return rc;
-}
-
-static int
-iw_create_listen(struct iw_cm_id *cm_id, int backlog)
-{
-	int rc;
-
-	iw_init_sock(cm_id);
-	rc = solisten(cm_id->so, backlog, curthread);
-	if (rc != 0)
-		iw_close_socket(cm_id, 0);
-	return rc;
+	return (0);
 }
 
 static int
 iw_destroy_listen(struct iw_cm_id *cm_id)
 {
-	int rc;
-	rc = iw_close_socket(cm_id, 0);
-	return rc;
+	struct socket *so = cm_id->so;
+
+	SOLISTEN_LOCK(so);
+	solisten_upcall_set(so, NULL, NULL);
+	SOLISTEN_UNLOCK(so);
+	return (0);
 }
 
 
@@ -659,6 +622,9 @@ void iw_destroy_cm_id(struct iw_cm_id *cm_id)
 	destroy_cm_id(cm_id);
 
 	wait_for_completion(&cm_id_priv->destroy_comp);
+
+	if (cm_id->so)
+		sock_release(cm_id->so);
 
 	free_cm_id(cm_id_priv);
 }
@@ -1162,6 +1128,8 @@ static void cm_work_handler(struct work_struct *_work)
 			}
 			return;
 		}
+		if (empty)
+			return;
 		spin_lock_irqsave(&cm_id_priv->lock, flags);
 	}
 	spin_unlock_irqrestore(&cm_id_priv->lock, flags);

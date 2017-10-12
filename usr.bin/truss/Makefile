@@ -1,12 +1,13 @@
 # $FreeBSD$
 
-NO_WERROR=
+#NO_WERROR=
 PROG=	truss
-SRCS=	cloudabi.c main.c setup.c syscalls.c
+SRCS=	main.c setup.c syscalls.c
 
 LIBADD=	sysdecode
 
-CFLAGS+= -I${.CURDIR} -I. -I${.CURDIR}/../../sys
+#CFLAGS+= -I${.CURDIR} -I. -I${SRCTOP}/sys
+CFLAGS+= -I${SRCTOP}/sys
 
 ABIS+=		freebsd
 # Each ABI is expected to have an ABI.c, MACHINE_ARCH-ABI.c or
@@ -18,6 +19,7 @@ ABIS+=		cloudabi64
 ABIS+=		i386-linux
 .endif
 .if ${MACHINE_CPUARCH} == "amd64"
+ABIS+=		amd64-linux
 ABIS+=		amd64-linux32
 ABIS+=		freebsd32
 ABIS+=		cloudabi64

@@ -263,6 +263,17 @@ struct bxe_eth_stats {
     uint32_t mbuf_alloc_rx;
     uint32_t mbuf_alloc_sge;
     uint32_t mbuf_alloc_tpa;
+
+    /* num. of times tx queue full occurred */
+    uint32_t tx_queue_full_return;
+    /* debug stats */
+    uint32_t bxe_tx_mq_sc_state_failures;
+    uint32_t tx_request_link_down_failures;
+    uint32_t bd_avail_too_less_failures;
+    uint32_t tx_mq_not_empty;
+    uint32_t nsegs_path1_errors;
+    uint32_t nsegs_path2_errors;
+
 };
 
 
@@ -366,6 +377,18 @@ struct bxe_eth_q_stats {
     uint32_t mbuf_alloc_rx;
     uint32_t mbuf_alloc_sge;
     uint32_t mbuf_alloc_tpa;
+
+    /* num. of times tx queue full occurred */
+    uint32_t tx_queue_full_return;
+
+    /* debug stats */
+    uint32_t bxe_tx_mq_sc_state_failures;
+    uint32_t tx_request_link_down_failures;
+    uint32_t bd_avail_too_less_failures;
+    uint32_t tx_mq_not_empty;
+    uint32_t nsegs_path1_errors;
+    uint32_t nsegs_path2_errors;
+
 };
 
 struct bxe_eth_stats_old {

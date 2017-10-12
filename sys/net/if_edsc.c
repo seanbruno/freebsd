@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following edsclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -336,7 +336,7 @@ vnet_edsc_uninit(const void *unused __unused)
 	 */
 	if_clone_detach(V_edsc_cloner);
 }
-VNET_SYSUNINIT(vnet_edsc_uninit, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY,
+VNET_SYSUNINIT(vnet_edsc_uninit, SI_SUB_INIT_IF, SI_ORDER_ANY,
     vnet_edsc_uninit, NULL);
 
 /*

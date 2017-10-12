@@ -10,12 +10,12 @@ WARNS?=		6
 
 SRCS=		efi_fdt.c
 
-CFLAGS+=	-ffreestanding -msoft-float
+CFLAGS+=	-ffreestanding
 .if ${MACHINE_CPUARCH} == "aarch64"
 CFLAGS+=	-mgeneral-regs-only
+.else
+CFLAGS+=	-msoft-float
 .endif
-
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
 
 # EFI library headers
 CFLAGS+=	-I${.CURDIR}/../include
@@ -27,7 +27,7 @@ CFLAGS+=	-I${.CURDIR}/../../fdt
 # Pick up the bootstrap header for some interface items
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
 
-machine:
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../${MACHINE}/include machine
 
 CLEANFILES+=	machine

@@ -42,7 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <uuid.h>
 
 #ifdef PART_DEBUG
-#define	DEBUG(fmt, args...) printf("%s: " fmt "\n" , __func__ , ## args)
+#define	DEBUG(fmt, args...) printf("%s: " fmt "\n", __func__, ## args)
 #else
 #define	DEBUG(fmt, args...)
 #endif
@@ -104,7 +104,7 @@ parttype2str(enum partition_type type)
 {
 	size_t i;
 
-	for (i = 0; i < sizeof(ptypes) / sizeof(ptypes[0]); i++)
+	for (i = 0; i < nitems(ptypes); i++)
 		if (ptypes[i].type == type)
 			return (ptypes[i].desc);
 	return (ptypes[0].desc);
@@ -145,7 +145,7 @@ gpt_parttype(uuid_t type)
 	return (PART_UNKNOWN);
 }
 
-static struct gpt_hdr*
+static struct gpt_hdr *
 gpt_checkhdr(struct gpt_hdr *hdr, uint64_t lba_self, uint64_t lba_last,
     uint16_t sectorsize)
 {
@@ -199,7 +199,7 @@ gpt_checkhdr(struct gpt_hdr *hdr, uint64_t lba_self, uint64_t lba_last,
 }
 
 static int
-gpt_checktbl(const struct gpt_hdr *hdr, u_char *tbl, size_t size,
+gpt_checktbl(const struct gpt_hdr *hdr, uint8_t *tbl, size_t size,
     uint64_t lba_last)
 {
 	struct gpt_ent *ent;
@@ -226,13 +226,13 @@ gpt_checktbl(const struct gpt_hdr *hdr, u_char *tbl, size_t size,
 	return (0);
 }
 
-static struct ptable*
+static struct ptable *
 ptable_gptread(struct ptable *table, void *dev, diskread_t dread)
 {
 	struct pentry *entry;
 	struct gpt_hdr *phdr, hdr;
 	struct gpt_ent *ent;
-	u_char *buf, *tbl;
+	uint8_t *buf, *tbl;
 	uint64_t offset;
 	int pri, sec;
 	size_t size, i;
@@ -257,8 +257,9 @@ ptable_gptread(struct ptable *table, void *dev, diskread_t dread)
 	    table->sectorsize);
 	if (phdr != NULL) {
 		/* Read the primary GPT table. */
-		size = MIN(MAXTBLSZ, (phdr->hdr_entries * phdr->hdr_entsz +
-		    table->sectorsize - 1) / table->sectorsize);
+		size = MIN(MAXTBLSZ,
+		    howmany(phdr->hdr_entries * phdr->hdr_entsz,
+		        table->sectorsize));
 		if (dread(dev, tbl, size, phdr->hdr_lba_table) == 0 &&
 		    gpt_checktbl(phdr, tbl, size * table->sectorsize,
 		    table->sectors - 1) == 0) {
@@ -290,9 +291,9 @@ ptable_gptread(struct ptable *table, void *dev, diskread_t dread)
 		    hdr.hdr_entsz != phdr->hdr_entsz ||
 		    hdr.hdr_crc_table != phdr->hdr_crc_table) {
 			/* Read the backup GPT table. */
-			size = MIN(MAXTBLSZ, (phdr->hdr_entries *
-			    phdr->hdr_entsz + table->sectorsize - 1) /
-			    table->sectorsize);
+			size = MIN(MAXTBLSZ,
+				   howmany(phdr->hdr_entries * phdr->hdr_entsz,
+				       table->sectorsize));
 			if (dread(dev, tbl, size, phdr->hdr_lba_table) == 0 &&
 			    gpt_checktbl(phdr, tbl, size * table->sectorsize,
 			    table->sectors - 1) == 0) {
@@ -309,10 +310,30 @@ ptable_gptread(struct ptable *table, void *dev, diskread_t dread)
 	DEBUG("GPT detected");
 	size = MIN(hdr.hdr_entries * hdr.hdr_entsz,
 	    MAXTBLSZ * table->sectorsize);
+
+	/*
+	 * If the disk's sector count is smaller than the sector count recorded
+	 * in the disk's GPT table header, set the table->sectors to the value
+	 * recorded in GPT tables. This is done to work around buggy firmware
+	 * that returns truncated disk sizes.
+	 *
+	 * Note, this is still not a foolproof way to get disk's size. For
+	 * example, an image file can be truncated when copied to smaller media.
+	 */
+	if (hdr.hdr_lba_alt + 1 > table->sectors)
+		table->sectors = hdr.hdr_lba_alt + 1;
+
 	for (i = 0; i < size / hdr.hdr_entsz; i++) {
 		ent = (struct gpt_ent *)(tbl + i * hdr.hdr_entsz);
 		if (uuid_equal(&ent->ent_type, &gpt_uuid_unused, NULL))
 			continue;
+
+		/* Simple sanity checks. */
+		if (ent->ent_lba_start < hdr.hdr_lba_start ||
+		    ent->ent_lba_end > hdr.hdr_lba_end ||
+		    ent->ent_lba_start > ent->ent_lba_end)
+			continue;
+
 		entry = malloc(sizeof(*entry));
 		if (entry == NULL)
 			break;
@@ -358,7 +379,7 @@ mbr_parttype(uint8_t type)
 	return (PART_UNKNOWN);
 }
 
-static struct ptable*
+static struct ptable *
 ptable_ebrread(struct ptable *table, void *dev, diskread_t dread)
 {
 	struct dos_partition *dp;
@@ -436,13 +457,13 @@ bsd_parttype(uint8_t type)
 	return (PART_UNKNOWN);
 }
 
-static struct ptable*
+static struct ptable *
 ptable_bsdread(struct ptable *table, void *dev, diskread_t dread)
 {
 	struct disklabel *dl;
 	struct partition *part;
 	struct pentry *entry;
-	u_char *buf;
+	uint8_t *buf;
 	uint32_t raw_offset;
 	int i;
 
@@ -485,7 +506,7 @@ ptable_bsdread(struct ptable *table, void *dev, diskread_t dread)
 			break;
 		entry->part.start = le32toh(part->p_offset) - raw_offset;
 		entry->part.end = entry->part.start +
-		    le32toh(part->p_size) + 1;
+		    le32toh(part->p_size) - 1;
 		entry->part.type = bsd_parttype(part->p_fstype);
 		entry->part.index = i; /* starts from zero */
 		entry->type.bsd = part->p_fstype;
@@ -514,16 +535,16 @@ vtoc8_parttype(uint16_t type)
 		return (PART_FREEBSD_VINUM);
 	case VTOC_TAG_FREEBSD_ZFS:
 		return (PART_FREEBSD_ZFS);
-	};
+	}
 	return (PART_UNKNOWN);
 }
 
-static struct ptable*
+static struct ptable *
 ptable_vtoc8read(struct ptable *table, void *dev, diskread_t dread)
 {
 	struct pentry *entry;
 	struct vtoc8 *dl;
-	u_char *buf;
+	uint8_t *buf;
 	uint16_t sum, heads, sectors;
 	int i;
 
@@ -582,13 +603,13 @@ out:
 }
 #endif /* LOADER_VTOC8_SUPPORT */
 
-struct ptable*
-ptable_open(void *dev, off_t sectors, uint16_t sectorsize,
+struct ptable *
+ptable_open(void *dev, uint64_t sectors, uint16_t sectorsize,
     diskread_t *dread)
 {
 	struct dos_partition *dp;
 	struct ptable *table;
-	u_char *buf;
+	uint8_t *buf;
 	int i, count;
 #ifdef LOADER_MBR_SUPPORT
 	struct pentry *entry;
@@ -663,8 +684,9 @@ ptable_open(void *dev, off_t sectors, uint16_t sectorsize,
 		if (dp[1].dp_typ != DOSPTYP_HFS) {
 			table->type = PTABLE_NONE;
 			DEBUG("Incorrect PMBR, ignore it");
-		} else
+		} else {
 			DEBUG("Bootcamp detected");
+		}
 	}
 #ifdef LOADER_GPT_SUPPORT
 	if (table->type == PTABLE_GPT) {
@@ -734,6 +756,19 @@ ptable_gettype(const struct ptable *table)
 }
 
 int
+ptable_getsize(const struct ptable *table, uint64_t *sizep)
+{
+	uint64_t tmp = table->sectors * table->sectorsize;
+
+	if (tmp < table->sectors)
+		return (EOVERFLOW);
+
+	if (sizep != NULL)
+		*sizep = tmp;
+	return (0);
+}
+
+int
 ptable_getpart(const struct ptable *table, struct ptable_entry *part, int index)
 {
 	struct pentry *entry;
@@ -760,14 +795,14 @@ ptable_getpart(const struct ptable *table, struct ptable_entry *part, int index)
  * 5: Active FAT/FAT32 slice
  * 6: non-active FAT/FAT32 slice
  */
-#define PREF_RAWDISK	0
-#define PREF_FBSD_ACT	1
-#define PREF_FBSD	2
-#define PREF_LINUX_ACT	3
-#define PREF_LINUX	4
-#define PREF_DOS_ACT	5
-#define PREF_DOS	6
-#define PREF_NONE	7
+#define	PREF_RAWDISK	0
+#define	PREF_FBSD_ACT	1
+#define	PREF_FBSD	2
+#define	PREF_LINUX_ACT	3
+#define	PREF_LINUX	4
+#define	PREF_DOS_ACT	5
+#define	PREF_DOS	6
+#define	PREF_NONE	7
 int
 ptable_getbestpart(const struct ptable *table, struct ptable_entry *part)
 {
@@ -828,11 +863,12 @@ ptable_getbestpart(const struct ptable *table, struct ptable_entry *part)
 	return (ENOENT);
 }
 
-void
+int
 ptable_iterate(const struct ptable *table, void *arg, ptable_iterate_t *iter)
 {
 	struct pentry *entry;
 	char name[32];
+	int ret = 0;
 
 	name[0] = '\0';
 	STAILQ_FOREACH(entry, &table->entries, entry) {
@@ -848,14 +884,15 @@ ptable_iterate(const struct ptable *table, void *arg, ptable_iterate_t *iter)
 #endif
 #ifdef LOADER_VTOC8_SUPPORT
 		if (table->type == PTABLE_VTOC8)
-			sprintf(name, "%c", (u_char) 'a' +
+			sprintf(name, "%c", (uint8_t) 'a' +
 			    entry->part.index);
 		else
 #endif
 		if (table->type == PTABLE_BSD)
-			sprintf(name, "%c", (u_char) 'a' +
+			sprintf(name, "%c", (uint8_t) 'a' +
 			    entry->part.index);
-		iter(arg, name, &entry->part);
+		if ((ret = iter(arg, name, &entry->part)) != 0)
+			return (ret);
 	}
+	return (ret);
 }
-

@@ -64,14 +64,12 @@ LIBFDT=		${.OBJDIR}/../../fdt/libfdt.a
 .if ${MK_FORTH} != "no"
 # Enable BootForth
 BOOT_FORTH=	yes
-CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/powerpc
+CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl
+CFLAGS+=	-I${.CURDIR}/../../ficl/powerpc
 LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
 .endif
 
-# Avoid the open-close-dance for every file access as some firmwares perform
-# an auto-negotiation on every open of the network interface and thus causes
-# netbooting to take horribly long.
-CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE -mcpu=powerpc64
+CFLAGS+=	-mcpu=powerpc64
 
 # Always add MI sources
 .PATH:		${.CURDIR}/../../common ${.CURDIR}/../../../libkern
@@ -79,7 +77,7 @@ CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE -mcpu=powerpc64
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../..
 CFLAGS+=	-I.
 
-CLEANFILES+=	vers.c loader.help
+CLEANFILES+=	loader.help
 
 CFLAGS+=	-Wall -ffreestanding -msoft-float -DAIM
 # load address. set in linker script
@@ -92,20 +90,13 @@ LDFLAGS=	-nostdlib -static -T ${.CURDIR}/ldscript.powerpc
 #.PATH:		${.CURDIR}/../../ofw/common
 #.include	"${.CURDIR}/../../ofw/common/Makefile.inc"
 
-# where to get libstand from
-LIBSTAND=	${.OBJDIR}/../../libstand32/libstand.a
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
-
-DPADD=		${LIBFICL} ${LIBOFW} ${LIBSTAND}
-LDADD=		${LIBFICL} ${LIBOFW} ${LIBSTAND}
+DPADD=		${LIBFICL} ${LIBOFW} ${LIBSA32}
+LDADD=		${LIBFICL} ${LIBOFW} ${LIBSA32}
 
 SC_DFLT_FONT=cp437
 
 font.h:
 	uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x16.fnt && file2c 'u_char dflt_font_16[16*256] = {' '};' < ${SC_DFLT_FONT}-8x16 > font.h && uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x14.fnt && file2c 'u_char dflt_font_14[14*256] = {' '};' < ${SC_DFLT_FONT}-8x14 >> font.h && uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x8.fnt && file2c 'u_char dflt_font_8[8*256] = {' '};' < ${SC_DFLT_FONT}-8x8 >> font.h
-
-vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
-	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
 
 loader.help: help.common help.ps3 ${.CURDIR}/../../fdt/help.fdt
 	cat ${.ALLSRC} | \

@@ -116,7 +116,7 @@ __FBSDID("$FreeBSD$");
  * To transmit frames, the driver again sets up lists and fragment
  * descriptors, only this time the buffers contain frame data that
  * is to be DMA'ed into the chip instead of out of it. Once the chip
- * has transfered the data into its on-board SRAM, it will trigger a
+ * has transferred the data into its on-board SRAM, it will trigger a
  * TX 'end of frame' interrupt. It will also generate an 'end of channel'
  * interrupt when it reaches the end of the list.
  */
@@ -534,7 +534,7 @@ static u_int8_t tl_eeprom_putbyte(sc, byte)
 	struct tl_softc		*sc;
 	int			byte;
 {
-	register int		i, ack = 0;
+	int			i, ack = 0;
 
 	/*
 	 * Make sure we're in TX mode.
@@ -579,7 +579,7 @@ static u_int8_t tl_eeprom_getbyte(sc, addr, dest)
 	int			addr;
 	u_int8_t		*dest;
 {
-	register int		i;
+	int			i;
 	u_int8_t		byte = 0;
 	device_t		tl_dev = sc->tl_dev;
 
@@ -2199,7 +2199,7 @@ static void
 tl_stop(sc)
 	struct tl_softc		*sc;
 {
-	register int		i;
+	int			i;
 	struct ifnet		*ifp;
 
 	TL_LOCK_ASSERT(sc);

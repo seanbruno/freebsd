@@ -1,5 +1,6 @@
 # $FreeBSD$
 
+PACKAGE=	ipf
 PROG=		ipf
 SRCS=		${GENHDRS} ipf.c ipfcomp.c ipf_y.c ipf_l.c bpf_filter.c
 MAN=		ipfilter.4 ipfilter.5 ipf.8 ipf.4 ipf.5 ipl.4
@@ -30,7 +31,7 @@ ipf_l.h: lexer.h
 	    ${.ALLSRC} > ${.TARGET}
 
 .if defined(RESCUE)
-LIBIPF_SRCS!=	cd ${.CURDIR}/../libipf && ${MAKE} -V SRCS
+LIBIPF_SRCS!=	cd ${.CURDIR:H}/libipf && ${MAKE} -V SRCS
 SRCS+=	${LIBIPF_SRCS}
 .else
 LIBADD+=	pcap

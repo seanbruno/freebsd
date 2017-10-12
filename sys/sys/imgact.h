@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -38,8 +38,11 @@
 
 #define MAXSHELLCMDLEN	PAGE_SIZE
 
+struct ucred;
+
 struct image_args {
 	char *buf;		/* pointer to string buffer */
+	void *bufkva;		/* cookie for string buffer KVA */
 	char *begin_argv;	/* beginning of argv in buf */
 	char *begin_envv;	/* beginning of envv in buf */
 	char *endp;		/* current `end' pointer of arg & env strings */
@@ -82,6 +85,8 @@ struct image_params {
 	int pagesizeslen;
 	vm_prot_t stack_prot;
 	u_long stack_sz;
+	struct ucred *newcred;		/* new credentials if changing */
+	bool credential_setid;		/* true if becoming setid */
 };
 
 #ifdef _KERNEL

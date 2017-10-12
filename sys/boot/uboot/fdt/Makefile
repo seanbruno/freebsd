@@ -12,8 +12,6 @@ SRCS=		uboot_fdt.c
 
 CFLAGS+=	-ffreestanding -msoft-float
 
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
-
 # U-Boot library headers
 CFLAGS+=	-I${.CURDIR}/../lib
 
@@ -23,11 +21,12 @@ CFLAGS+=	-I${.CURDIR}/../../fdt
 # Pick up the bootstrap header for some interface items
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
 
-machine:
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../${MACHINE_CPUARCH}/include machine
 
 CLEANFILES+=	machine
 
+.include <bsd.stand.mk>
 .include <bsd.lib.mk>
 
 beforedepend ${OBJS}: machine

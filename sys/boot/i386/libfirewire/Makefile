@@ -10,7 +10,6 @@ SRCS+=		dcons.c fwcrom.c
 CFLAGS+=	-D_BOOT
 
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand
 CFLAGS+=	-I${.CURDIR}/../btx/lib
 CFLAGS+=	-I${.CURDIR}/../libi386
 
@@ -18,7 +17,7 @@ CFLAGS+=	-Wformat -Wall
 
 .if ${MACHINE_CPUARCH} == "amd64"
 CLEANFILES+=    machine
-machine:
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../i386/include machine
 .endif
 

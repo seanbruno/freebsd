@@ -991,8 +991,8 @@ static int cx_detach (device_t dev)
 		/* Deallocate buffers. */
 		cx_bus_dma_mem_free (&d->dmamem);
 	}
-	bd->board = 0;
-	adapter [b->num] = 0;
+	bd->board = NULL;
+	adapter [b->num] = NULL;
 	free (b, M_DEVBUF);
 	splx (s);
 
@@ -2453,7 +2453,7 @@ static int ng_cx_rmnode (node_p node)
 		NG_NODE_SET_PRIVATE (node, NULL);
 		NG_NODE_UNREF (node);
 	}
-	NG_NODE_REVIVE(node);		/* Persistant node */
+	NG_NODE_REVIVE(node);		/* Persistent node */
 #endif
 	return 0;
 }

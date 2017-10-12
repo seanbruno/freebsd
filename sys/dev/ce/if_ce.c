@@ -76,7 +76,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/ce/ceddk.h>
 #include <machine/cserial.h>
 #include <machine/resource.h>
-#include <machine/pmap.h>
 
 /* If we don't have Cronyx's sppp version, we don't have fr support via sppp */
 #ifndef PP_FR
@@ -841,11 +840,11 @@ static int ce_detach (device_t dev)
 		if (! d || ! d->chan)
 			continue;
 		callout_drain (&d->timeout_handle);
-		channel [b->num * NCHAN + c->num] = 0;
+		channel [b->num * NCHAN + c->num] = NULL;
 		/* Deallocate buffers. */
 		ce_bus_dma_mem_free (&d->dmamem);
 	}
-	adapter [b->num] = 0;
+	adapter [b->num] = NULL;
 	ce_bus_dma_mem_free (&bd->dmamem);
 	free (b, M_DEVBUF);
 #if __FreeBSD_version >= 504000
@@ -2449,7 +2448,7 @@ static int ng_ce_rmnode (node_p node)
 		NG_NODE_UNREF (node);
 	}
 #if __FreeBSD_version >= 502120
-	NG_NODE_REVIVE(node);		/* Persistant node */
+	NG_NODE_REVIVE(node);		/* Persistent node */
 #else
 	node->nd_flags &= ~NG_INVALID;
 #endif

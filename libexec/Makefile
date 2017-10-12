@@ -5,7 +5,7 @@
 
 SUBDIR=	${_atf} \
 	${_atrun} \
-	${_casper} \
+	${_blacklistd-helper} \
 	${_comsat} \
 	${_dma} \
 	getty \
@@ -34,12 +34,12 @@ SUBDIR=	${_atf} \
 _atrun=		atrun
 .endif
 
-.if ${MK_BOOTPD} != "no"
-SUBDIR+=	bootpd
+.if ${MK_BLACKLIST} != "no"
+_blacklistd-helper+=	blacklistd-helper
 .endif
 
-.if ${MK_CASPER} != "no"
-_casper=	casper
+.if ${MK_BOOTPD} != "no"
+SUBDIR+=	bootpd
 .endif
 
 .if ${MK_FINGER} != "no"
@@ -77,11 +77,6 @@ _rtld-elf=	rtld-elf
 
 .if ${MK_RBOOTD} != "no"
 SUBDIR+=	rbootd
-.endif
-
-.if ${MK_RCMDS} != "no"
-_rlogind=	rlogind
-_rshd=		rshd
 .endif
 
 .if ${MK_SENDMAIL} != "no"

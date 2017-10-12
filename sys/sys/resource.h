@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -36,6 +36,16 @@
 #include <sys/cdefs.h>
 #include <sys/_timeval.h>
 #include <sys/_types.h>
+
+#ifndef _ID_T_DECLARED
+typedef	__id_t		id_t;
+#define	_ID_T_DECLARED
+#endif
+
+#ifndef _RLIM_T_DECLARED
+typedef	__rlim_t	rlim_t;
+#define	_RLIM_T_DECLARED
+#endif
 
 /*
  * Process priority specifications to get/setpriority.
@@ -104,12 +114,13 @@ struct __wrusage {
 #define	RLIMIT_NPTS	11		/* pseudo-terminals */
 #define	RLIMIT_SWAP	12		/* swap used */
 #define	RLIMIT_KQUEUES	13		/* kqueues allocated */
+#define	RLIMIT_UMTXP	14		/* process-shared umtx */
 
-#define	RLIM_NLIMITS	14		/* number of resource limits */
+#define	RLIM_NLIMITS	15		/* number of resource limits */
 
-#define	RLIM_INFINITY	((rlim_t)(((uint64_t)1 << 63) - 1))
-/* XXX Missing: RLIM_SAVED_MAX, RLIM_SAVED_CUR */
-
+#define	RLIM_INFINITY	((rlim_t)(((__uint64_t)1 << 63) - 1))
+#define	RLIM_SAVED_MAX	RLIM_INFINITY
+#define	RLIM_SAVED_CUR	RLIM_INFINITY
 
 /*
  * Resource limit string identifiers
@@ -131,12 +142,8 @@ static const char *rlimit_ident[RLIM_NLIMITS] = {
 	"npts",
 	"swap",
 	"kqueues",
+	"umtx",
 };
-#endif
-
-#ifndef _RLIM_T_DECLARED
-typedef	__rlim_t	rlim_t;
-#define	_RLIM_T_DECLARED
 #endif
 
 struct rlimit {

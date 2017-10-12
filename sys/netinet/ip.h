@@ -11,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -147,7 +147,7 @@ struct ip {
 #define	IPOPT_SECURITY		130		/* provide s,c,h,tcc */
 #define	IPOPT_LSRR		131		/* loose source route */
 #define	IPOPT_ESO		133		/* extended security */
-#define	IPOPT_CIPSO		134		/* commerical security */
+#define	IPOPT_CIPSO		134		/* commercial security */
 #define	IPOPT_SATID		136		/* satnet id */
 #define	IPOPT_SSRR		137		/* strict source route */
 #define	IPOPT_RA		148		/* router alert */

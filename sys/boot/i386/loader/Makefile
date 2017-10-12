@@ -8,9 +8,13 @@ PROG=		${LOADER}.sym
 MAN=	
 INTERNALPROG=
 NEWVERSWHAT?=	"bootstrap loader" x86
+VERSION_FILE=	${.CURDIR}/../loader/version
+LOADER_NET_SUPPORT?=	yes
+LOADER_NFS_SUPPORT?=	yes
+LOADER_TFTP_SUPPORT?=	yes
 
 # architecture-specific loader code
-SRCS=		main.c conf.c vers.c
+SRCS=		main.c conf.c vers.c chain.c
 
 # Put LOADER_FIREWIRE_SUPPORT=yes in /etc/make.conf for FireWire/dcons support
 .if defined(LOADER_FIREWIRE_SUPPORT)
@@ -24,10 +28,10 @@ CFLAGS+=	-DLOADER_ZFS_SUPPORT
 LIBZFSBOOT=	${.OBJDIR}/../../zfs/libzfsboot.a
 .endif
 
-# Enable PXE TFTP or NFS support, not both.
 .if defined(LOADER_TFTP_SUPPORT)
 CFLAGS+=	-DLOADER_TFTP_SUPPORT
-.else
+.endif
+.if defined(LOADER_NFS_SUPPORT)
 CFLAGS+=	-DLOADER_NFS_SUPPORT
 .endif
 
@@ -58,6 +62,14 @@ CFLAGS+=	-DLOADER_GZIP_SUPPORT
 .if defined(LOADER_NANDFS_SUPPORT)
 CFLAGS+=	-DLOADER_NANDFS_SUPPORT
 .endif
+.if !defined(LOADER_NO_GELI_SUPPORT)
+CFLAGS+=	-DLOADER_GELI_SUPPORT
+CFLAGS+=	-I${.CURDIR}/../../geli
+LIBGELIBOOT=	${.OBJDIR}/../../geli/libgeliboot.a
+.PATH:		${.CURDIR}/../../../opencrypto
+SRCS+=		xform_aes_xts.c
+CFLAGS+=	-I${.CURDIR}/../../.. -D_STAND
+.endif
 
 # Always add MI sources
 .PATH:		${.CURDIR}/../../common
@@ -65,7 +77,7 @@ CFLAGS+=	-DLOADER_NANDFS_SUPPORT
 CFLAGS+=	-I${.CURDIR}/../../common
 CFLAGS+=	-I.
 
-CLEANFILES=	vers.c ${LOADER} ${LOADER}.bin loader.help
+CLEANFILES=	${LOADER} ${LOADER}.bin loader.help
 
 CFLAGS+=	-Wall
 LDFLAGS=	-static -Ttext 0x0
@@ -73,8 +85,6 @@ LDFLAGS=	-static -Ttext 0x0
 # i386 standalone support library
 LIBI386=	${.OBJDIR}/../libi386/libi386.a
 CFLAGS+=	-I${.CURDIR}/..
-
-LIBSTAND=	${.OBJDIR}/../../libstand32/libstand.a
 
 # BTX components
 CFLAGS+=	-I${.CURDIR}/../btx/lib
@@ -86,17 +96,12 @@ CFLAGS+=	-I${.CURDIR}/../btx/lib
 # Pick up ../Makefile.inc early.
 .include <bsd.init.mk>
 
-vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/../loader/version
-	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/../loader/version \
-		${NEWVERSWHAT}
-
 ${LOADER}: ${LOADER}.bin ${BTXLDR} ${BTXKERN}
 	btxld -v -f aout -e ${LOADER_ADDRESS} -o ${.TARGET} -l ${BTXLDR} \
 		-b ${BTXKERN} ${LOADER}.bin
 
 ${LOADER}.bin: ${LOADER}.sym
-	cp ${.ALLSRC} ${.TARGET}
-	strip -R .comment -R .note ${.TARGET}
+	strip -R .comment -R .note -o ${.TARGET} ${.ALLSRC}
 
 loader.help: help.common help.i386
 	cat ${.ALLSRC} | awk -f ${.CURDIR}/../../common/merge_help.awk > ${.TARGET}
@@ -116,8 +121,8 @@ FILES+=	loader.rc menu.rc
 # XXX crt0.o needs to be first for pxeboot(8) to work
 OBJS=	${BTXCRT}
 
-DPADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFSBOOT} ${LIBI386} ${LIBSTAND}
-LDADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFSBOOT} ${LIBI386} ${LIBSTAND}
+DPADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFSBOOT} ${LIBI386} ${LIBGELIBOOT} ${LIBSA32}
+LDADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFSBOOT} ${LIBI386} ${LIBGELIBOOT} ${LIBSA32}
 
 .include <bsd.prog.mk>
 
@@ -125,6 +130,6 @@ LDADD=	${LIBFICL} ${LIBFIREWIRE} ${LIBZFSBOOT} ${LIBI386} ${LIBSTAND}
 beforedepend ${OBJS}: machine
 CLEANFILES+=	machine
 CFLAGS+=	-DLOADER_PREFER_AMD64
-machine: .NOPATH
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../i386/include machine
 .endif

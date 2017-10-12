@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2009-2015 Solarflare Communications Inc.
+ * Copyright (c) 2009-2016 Solarflare Communications Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -218,7 +218,7 @@ extern	__checkReturn	efx_rc_t
 efx_mcdi_mac_stats_periodic(
 	__in		efx_nic_t *enp,
 	__in		efsys_mem_t *esmp,
-	__in		uint16_t period,
+	__in		uint16_t period_ms,
 	__in		boolean_t events);
 
 

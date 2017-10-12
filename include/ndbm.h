@@ -52,8 +52,8 @@
 #define	DBM_SUFFIX	".db"
 
 typedef struct {
-	char *dptr;
-	int dsize;
+	void *dptr;
+	int dsize;	/* XXX Should be size_t according to 1003.1-2008. */
 } datum;
 
 typedef DB DBM;
@@ -70,7 +70,7 @@ datum	 dbm_firstkey(DBM *);
 long	 dbm_forder(DBM *, datum);
 #endif
 datum	 dbm_nextkey(DBM *);
-DBM	*dbm_open(const char *, int, int);
+DBM	*dbm_open(const char *, int, mode_t);
 int	 dbm_store(DBM *, datum, datum, int);
 #if __BSD_VISIBLE
 int	 dbm_dirfno(DBM *);

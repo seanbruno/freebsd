@@ -11,7 +11,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -140,7 +140,7 @@ recvjob(const char *printer)
 
 /*
  * Read printer jobs sent by lpd and copy them to the spooling directory.
- * Return the number of jobs successfully transfered.
+ * Return the number of jobs successfully transferred.
  */
 static int
 readjob(struct printer *pp)
@@ -356,7 +356,7 @@ read_number(const char *fn)
 }
 
 /*
- * Remove all the files associated with the current job being transfered.
+ * Remove all the files associated with the current job being transferred.
  */
 static void
 rcleanup(int signo __unused)

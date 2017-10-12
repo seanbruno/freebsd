@@ -164,8 +164,8 @@ ed_alloc_port(device_t dev, int rid, int size)
 	struct ed_softc *sc = device_get_softc(dev);
 	struct resource *res;
 
-	res = bus_alloc_resource(dev, SYS_RES_IOPORT, &rid,
-	    0ul, ~0ul, size, RF_ACTIVE);
+	res = bus_alloc_resource_anywhere(dev, SYS_RES_IOPORT, &rid,
+	    size, RF_ACTIVE);
 	if (res) {
 		sc->port_res = res;
 		sc->port_used = size;
@@ -185,8 +185,8 @@ ed_alloc_memory(device_t dev, int rid, int size)
 	struct ed_softc *sc = device_get_softc(dev);
 	struct resource *res;
 
-	res = bus_alloc_resource(dev, SYS_RES_MEMORY, &rid,
-	    0ul, ~0ul, size, RF_ACTIVE);
+	res = bus_alloc_resource_anywhere(dev, SYS_RES_MEMORY, &rid,
+	    size, RF_ACTIVE);
 	if (res) {
 		sc->mem_res = res;
 		sc->mem_used = size;
@@ -751,7 +751,7 @@ outloop:
 		return;
 	}
 	IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
-	if (m == 0) {
+	if (m == NULL) {
 
 		/*
 		 * We are using the !OACTIVE flag to indicate to the outside

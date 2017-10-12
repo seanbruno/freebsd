@@ -36,10 +36,7 @@ __FBSDID("$FreeBSD$");
 struct arch_switch	archsw;		/* MI/MD interface boundary */
 
 extern char end[];
-extern char bootprog_name[];
-extern char bootprog_rev[];
-extern char bootprog_date[];
-extern char bootprog_maker[];
+extern char bootprog_info[];
 
 u_int32_t	acells, scells;
 
@@ -98,7 +95,7 @@ main(int (*openfirm)(void *))
 	char		**bargv;
 
 	/*
-	 * Initalise the Open Firmware routines by giving them the entry point.
+	 * Initialise the Open Firmware routines by giving them the entry point.
 	 */
 	OF_init(openfirm);
 
@@ -127,9 +124,7 @@ main(int (*openfirm)(void *))
 		if (devsw[i]->dv_init != NULL)
 			(devsw[i]->dv_init)();
 
-	printf("\n");
-	printf("%s, Revision %s\n", bootprog_name, bootprog_rev);
-	printf("(%s, %s)\n", bootprog_maker, bootprog_date);
+	printf("\n%s", bootprog_info);
 	printf("Memory: %lldKB\n", memsize() / 1024);
 
 	OF_getprop(chosen, "bootpath", bootpath, 64);

@@ -12,7 +12,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -145,9 +145,6 @@ struct malloc_type_header {
 MALLOC_DECLARE(M_CACHE);
 MALLOC_DECLARE(M_DEVBUF);
 MALLOC_DECLARE(M_TEMP);
-
-MALLOC_DECLARE(M_IP6OPT); /* for INET6 */
-MALLOC_DECLARE(M_IP6NDP); /* for INET6 */
 
 /*
  * Deprecated macro versions of not-quite-malloc() and free().

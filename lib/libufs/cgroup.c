@@ -157,7 +157,7 @@ gotit:
 		bzero(block, (int)fs->fs_bsize);
 		dp2 = (struct ufs2_dinode *)&block;
 		for (i = 0; i < INOPB(fs); i++) {
-			dp2->di_gen = arc4random() / 2 + 1;
+			dp2->di_gen = arc4random();
 			dp2++;
 		}
 		if (bwrite(disk, ino_to_fsba(fs,
@@ -214,6 +214,11 @@ cgwrite1(struct uufsd *disk, int c)
 	struct fs *fs;
 
 	fs = &disk->d_fs;
+	if ((fs->fs_metackhash & CK_CYLGRP) != 0) {
+		disk->d_cg.cg_ckhash = 0;
+		disk->d_cg.cg_ckhash =
+		    calculate_crc32c(~0L, (void *)&disk->d_cg, fs->fs_cgsize);
+	}
 	if (bwrite(disk, fsbtodb(fs, cgtod(fs, c)),
 	    disk->d_cgunion.d_buf, fs->fs_bsize) == -1) {
 		ERROR(disk, "unable to write cylinder group");

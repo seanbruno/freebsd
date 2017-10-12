@@ -1098,6 +1098,7 @@ fw_xfer_alloc(struct malloc_type *type)
 		return xfer;
 
 	xfer->malloc = type;
+	xfer->tl = -1;
 
 	return xfer;
 }
@@ -1584,7 +1585,7 @@ fw_explore_node(struct fw_device *dfwdev)
 		 * speed map value.
 		 * 1394a-2000 compliant devices only use
 		 * the Bus Info Block link spd value, so
-		 * ignore the speed map alltogether. SWB
+		 * ignore the speed map altogether. SWB
 		 */
 		if (binfo->link_spd == FWSPD_S100 /* 0 */) {
 			device_printf(fc->bdev, "%s: "

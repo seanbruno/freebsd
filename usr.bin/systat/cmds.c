@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -120,10 +120,10 @@ command(const char *cmd)
 		(*curcmd->c_close)(wnd);
 		curcmd->c_flags &= ~CF_INIT;
 		wnd = (*p->c_open)();
-		if (wnd == 0) {
+		if (wnd == NULL) {
 			error("Couldn't open new display");
 			wnd = (*curcmd->c_open)();
-			if (wnd == 0) {
+			if (wnd == NULL) {
 				error("Couldn't change back to previous cmd");
 				exit(1);
 			}
@@ -141,7 +141,7 @@ command(const char *cmd)
 		status();
 		goto done;
 	}
-	if (curcmd->c_cmd == 0 || !(*curcmd->c_cmd)(tmpstr1, cp))
+	if (curcmd->c_cmd == NULL || !(*curcmd->c_cmd)(tmpstr1, cp))
 		error("%s: Unknown command.", tmpstr1);
 done:
 	free(tmpstr);

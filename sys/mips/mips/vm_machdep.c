@@ -16,7 +16,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -60,8 +60,11 @@ __FBSDID("$FreeBSD$");
 #include <machine/cache.h>
 #include <machine/clock.h>
 #include <machine/cpu.h>
+#include <machine/cpufunc.h>
+#include <machine/cpuinfo.h>
 #include <machine/md_var.h>
 #include <machine/pcb.h>
+#include <machine/tls.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
@@ -95,10 +98,9 @@ __FBSDID("$FreeBSD$");
  * ready to run and return to user mode.
  */
 void
-cpu_fork(register struct thread *td1,register struct proc *p2,
-    struct thread *td2,int flags)
+cpu_fork(struct thread *td1, struct proc *p2, struct thread *td2,int flags)
 {
-	register struct proc *p1;
+	struct proc *p1;
 	struct pcb *pcb2;
 
 	p1 = td1->td_proc;
@@ -151,6 +153,7 @@ cpu_fork(register struct thread *td1,register struct proc *p2,
 	 */
 
 	td2->td_md.md_tls = td1->td_md.md_tls;
+	td2->td_md.md_tls_tcb_offset = td1->td_md.md_tls_tcb_offset;
 	td2->td_md.md_saved_intr = MIPS_SR_INT_IE;
 	td2->td_md.md_spinlock_count = 1;
 #ifdef CPU_CNMIPS
@@ -194,7 +197,7 @@ cpu_fork(register struct thread *td1,register struct proc *p2,
  * This is needed to make kernel threads stay in kernel mode.
  */
 void
-cpu_set_fork_handler(struct thread *td, void (*func) __P((void *)), void *arg)
+cpu_fork_kthread_handler(struct thread *td, void (*func)(void *), void *arg)
 {
 	/*
 	 * Note that the trap frame follows the args, so the function
@@ -352,14 +355,14 @@ cpu_set_syscall_retval(struct thread *td, int error)
 }
 
 /*
- * Initialize machine state (pcb and trap frame) for a new thread about to
- * upcall. Put enough state in the new thread's PCB to get it to go back
- * userret(), where we can intercept it again to set the return (upcall)
- * Address and stack, along with those from upcalls that are from other sources
- * such as those generated in thread_userret() itself.
+ * Initialize machine state, mostly pcb and trap frame for a new
+ * thread, about to return to userspace.  Put enough state in the new
+ * thread's PCB to get it to go back to the fork_return(), which
+ * finalizes the thread state and handles peculiarities of the first
+ * return to userspace for the new thread.
  */
 void
-cpu_set_upcall(struct thread *td, struct thread *td0)
+cpu_copy_thread(struct thread *td, struct thread *td0)
 {
 	struct pcb *pcb2;
 
@@ -415,12 +418,11 @@ cpu_set_upcall(struct thread *td, struct thread *td0)
 }
 
 /*
- * Set that machine state for performing an upcall that has to
- * be done in thread_userret() so that those upcalls generated
- * in thread_userret() itself can be done as well.
+ * Set that machine state for performing an upcall that starts
+ * the entry function with the given argument.
  */
 void
-cpu_set_upcall_kse(struct thread *td, void (*entry)(void *), void *arg,
+cpu_set_upcall(struct thread *td, void (*entry)(void *), void *arg,
     stack_t *stack)
 {
 	struct trapframe *tf;
@@ -492,7 +494,17 @@ int
 cpu_set_user_tls(struct thread *td, void *tls_base)
 {
 
+#if defined(__mips_n64) && defined(COMPAT_FREEBSD32)
+	if (td->td_proc && SV_PROC_FLAG(td->td_proc, SV_ILP32))
+		td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET + TLS_TCB_SIZE32;
+	else
+#endif
+	td->td_md.md_tls_tcb_offset = TLS_TP_OFFSET + TLS_TCB_SIZE;
 	td->td_md.md_tls = (char*)tls_base;
+	if (td == curthread && cpuinfo.userlocal_reg == true) {
+		mips_wr_userlocal((unsigned long)tls_base +
+		    td->td_md.md_tls_tcb_offset);
+	}
 
 	return (0);
 }

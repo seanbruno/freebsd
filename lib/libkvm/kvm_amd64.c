@@ -14,7 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -118,7 +118,7 @@ _amd64_initvtop(kvm_t *kd)
 	amd64_pml4e_t *PML4;
 
 	kd->vmst = (struct vmstate *)_kvm_malloc(kd, sizeof(*kd->vmst));
-	if (kd->vmst == 0) {
+	if (kd->vmst == NULL) {
 		_kvm_err(kd, kd->program, "cannot allocate vm");
 		return (-1);
 	}
@@ -153,8 +153,13 @@ _amd64_initvtop(kvm_t *kd)
 	}
 	pa = le64toh(pa);
 	PML4 = _kvm_malloc(kd, AMD64_PAGE_SIZE);
+	if (PML4 == NULL) {
+		_kvm_err(kd, kd->program, "cannot allocate PML4");
+		return (-1);
+	}
 	if (kvm_read2(kd, pa, PML4, AMD64_PAGE_SIZE) != AMD64_PAGE_SIZE) {
 		_kvm_err(kd, kd->program, "cannot read KPML4phys");
+		free(PML4);
 		return (-1);
 	}
 	kd->vmst->PML4 = PML4;
@@ -188,7 +193,7 @@ _amd64_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 	 * If we are initializing (kernel page table descriptor pointer
 	 * not yet set) then return pa == va to avoid infinite recursion.
 	 */
-	if (vm->PML4 == 0) {
+	if (vm->PML4 == NULL) {
 		s = _kvm_pa2off(kd, va, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
@@ -227,7 +232,7 @@ _amd64_vatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 		/*
 		 * No next-level page table; pdpe describes one 1GB page.
 		 */
-		a = (pde & AMD64_PG_1GB_FRAME) + (va & AMD64_PDPMASK);
+		a = (pdpe & AMD64_PG_1GB_FRAME) + (va & AMD64_PDPMASK);
 		s = _kvm_pa2off(kd, a, pa);
 		if (s == 0) {
 			_kvm_err(kd, kd->program,
@@ -311,7 +316,7 @@ _amd64_kvatop(kvm_t *kd, kvaddr_t va, off_t *pa)
 }
 
 int
-_amd64_native(kvm_t *kd)
+_amd64_native(kvm_t *kd __unused)
 {
 
 #ifdef __amd64__
@@ -321,7 +326,7 @@ _amd64_native(kvm_t *kd)
 #endif
 }
 
-struct kvm_arch kvm_amd64 = {
+static struct kvm_arch kvm_amd64 = {
 	.ka_probe = _amd64_probe,
 	.ka_initvtop = _amd64_initvtop,
 	.ka_freevtop = _amd64_freevtop,

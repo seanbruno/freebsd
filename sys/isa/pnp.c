@@ -94,17 +94,6 @@ struct pnp_quirk pnp_quirks[] = {
 	{ 0 }
 };
 
-#ifdef PC98
-/* Some NEC PnP cards have 9 bytes serial code. */
-static pnp_id necids[] = {
-	{0x4180a3b8, 0xffffffff, 0x00},	/* PC-9801CB-B04 (NEC8041) */
-	{0x5181a3b8, 0xffffffff, 0x46},	/* PC-9821CB2-B04(NEC8151) */
-	{0x5182a3b8, 0xffffffff, 0xb8},	/* PC-9801-XX    (NEC8251) */
-	{0x9181a3b8, 0xffffffff, 0x00},	/* PC-9801-120   (NEC8191) */
-	{0, 0, 0}
-};
-#endif
-
 /* The READ_DATA port that we are using currently */
 static int pnp_rd_port;
 
@@ -416,14 +405,14 @@ static int
 pnp_create_devices(device_t parent, pnp_id *p, int csn,
     u_char *resources, int len)
 {
-	u_char tag, *resp, *resinfo, *startres = 0;
+	u_char tag, *resp, *resinfo, *startres = NULL;
 	int large_len, scanning = len, retval = FALSE;
 	uint32_t logical_id;
 	device_t dev = 0;
 	int ldn = 0;
 	struct pnp_set_config_arg *csnldn;
 	char buf[100];
-	char *desc = 0;
+	char *desc = NULL;
 
 	resp = resources;
 	while (scanning > 0) {
@@ -450,7 +439,7 @@ pnp_create_devices(device_t parent, pnp_id *p, int csn,
 				if (dev) {
 					/*
 					 * This is an optional device
-					 * indentifier string. Skipt it
+					 * identifier string. Skip it
 					 * for now.
 					 */
 					continue;
@@ -492,7 +481,7 @@ pnp_create_devices(device_t parent, pnp_id *p, int csn,
 				pnp_parse_resources(dev, startres,
 				    resinfo - startres - 1, ldn);
 				dev = 0;
-				startres = 0;
+				startres = NULL;
 			}
 
 			/* 
@@ -537,7 +526,7 @@ pnp_create_devices(device_t parent, pnp_id *p, int csn,
 			pnp_parse_resources(dev, startres,
 			    resinfo - startres - 1, ldn);
 			dev = 0;
-			startres = 0;
+			startres = NULL;
 			scanning = 0;
 			break;
 
@@ -674,13 +663,9 @@ pnp_isolation_protocol(device_t parent)
 	int csn;
 	pnp_id id;
 	int found = 0, len;
-	u_char *resources = 0;
+	u_char *resources = NULL;
 	int space = 0;
 	int error;
-#ifdef PC98
-	int n, necpnp;
-	u_char buffer[10];
-#endif
 
 	/*
 	 * Put all cards into the Sleep state so that we can clear
@@ -722,28 +707,6 @@ pnp_isolation_protocol(device_t parent)
 			 * logical devices on the card.
 			 */
 			pnp_write(PNP_SET_CSN, csn);
-#ifdef PC98
-			if (bootverbose)
-				printf("PnP Vendor ID = %x\n", id.vendor_id);
-			/* Check for NEC PnP (9 bytes serial). */
-			for (n = necpnp = 0; necids[n].vendor_id; n++) {
-				if (id.vendor_id == necids[n].vendor_id) {
-					necpnp = 1;
-					break;
-				}
-			}
-			if (necpnp) {
-				if (bootverbose)
-					printf("An NEC-PnP card (%s).\n",
-					    pnp_eisaformat(id.vendor_id));
-				/*  Read dummy 9 bytes serial area. */
-				pnp_get_resource_info(buffer, 9);
-			} else {
-				if (bootverbose)
-					printf("A Normal-ISA-PnP card (%s).\n",
-					    pnp_eisaformat(id.vendor_id));
-			}
-#endif
 			if (bootverbose)
 				printf("Reading PnP configuration for %s.\n",
 				    pnp_eisaformat(id.vendor_id));

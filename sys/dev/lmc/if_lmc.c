@@ -91,7 +91,11 @@
 # define  P2P 0		/* not in FreeBSD */
 # define NSPPP 1	/* No count devices in FreeBSD 5 */
 # include "opt_bpf.h"	/* DEV_BPF */
-# define NBPFILTER DEV_BPF
+# ifdef DEV_BPF
+#  define NBPFILTER 1
+# else
+#  define NBPFILTER 0
+# endif
 # define  GEN_HDLC 0	/* not in FreeBSD */
 #
 # include <sys/systm.h>
@@ -1268,7 +1272,7 @@ t3_send_dbl_feac(softc_t *sc, int feac1, int feac2)
   /* Flush received FEACS; don't respond to our own loop cmd! */
   while (read_framer(sc, T3CSR_FEAC_STK) & FEAC_STK_VALID) DELAY(1); /* XXX HANG */
   /* Restore previous state of the FEAC transmitter. */
-  /* If it was sending a continous FEAC, it will resume. */
+  /* If it was sending a continuous FEAC, it will resume. */
   write_framer(sc, T3CSR_TX_FEAC, tx_feac);
   }
 

@@ -16,14 +16,17 @@ _PRIVATELIBS=	\
 		atf_c \
 		atf_cxx \
 		bsdstat \
+		devdctl \
 		event \
 		heimipcc \
 		heimipcs \
+		ifconfig \
 		ldns \
 		sqlite3 \
 		ssh \
 		ucl \
-		unbound
+		unbound \
+		zstd
 
 _INTERNALLIBS=	\
 		amu \
@@ -68,8 +71,12 @@ _LIBRARIES=	\
 		c_pic \
 		calendar \
 		cam \
-		capsicum \
 		casper \
+		cap_dns \
+		cap_grp \
+		cap_pwd \
+		cap_random \
+		cap_sysctl \
 		com_err \
 		compiler_rt \
 		crypt \
@@ -78,13 +85,16 @@ _LIBRARIES=	\
 		cuse \
 		cxxrt \
 		devctl \
+		devdctl \
 		devinfo \
 		devstat \
 		dialog \
+		dl \
 		dpv \
 		dtrace \
 		dwarf \
 		edit \
+		efivar \
 		elf \
 		execinfo \
 		fetch \
@@ -172,6 +182,12 @@ _LIBRARIES=	\
 		zfs \
 		zpool \
 
+.if ${MK_BLACKLIST} != "no"
+_LIBRARIES+= \
+		blacklist \
+
+.endif
+
 .if ${MK_OFED} != "no"
 _LIBRARIES+= \
 		cxgb4 \
@@ -194,6 +210,10 @@ _LIBRARIES+= \
 # 2nd+ order consumers.  Auto-generating this would be better.
 _DP_80211=	sbuf bsdxml
 _DP_archive=	z bz2 lzma bsdxml
+_DP_zstd=	pthread
+.if ${MK_BLACKLIST} != "no"
+_DP_blacklist+=	pthread
+.endif
 .if ${MK_OPENSSL} != "no"
 _DP_archive+=	crypto
 .else
@@ -211,9 +231,13 @@ _DP_bsnmp=	crypto
 .endif
 _DP_geom=	bsdxml sbuf
 _DP_cam=	sbuf
-_DP_casper=	capsicum nv pjdlog
-_DP_capsicum=	nv
 _DP_kvm=	elf
+_DP_casper=	nv
+_DP_cap_dns=	nv
+_DP_cap_grp=	nv
+_DP_cap_pwd=	nv
+_DP_cap_random=	nv
+_DP_cap_sysctl=	nv
 _DP_pjdlog=	util
 _DP_opie=	md
 _DP_usb=	pthread
@@ -224,6 +248,7 @@ _DP_radius=	md
 .else
 _DP_radius=	crypto
 .endif
+_DP_rtld_db=	elf procstat
 _DP_procstat=	kvm util elf
 .if ${MK_CXX} == "yes"
 .if ${MK_LIBCPLUSPLUS} != "no"
@@ -235,7 +260,7 @@ _DP_proc=	supcplusplus
 .if ${MK_CDDL} != "no"
 _DP_proc+=	ctf
 .endif
-_DP_proc+=	elf rtld_db util
+_DP_proc+=	elf procstat rtld_db util
 _DP_mp=	crypto
 _DP_memstat=	kvm
 _DP_magic=	z
@@ -304,16 +329,28 @@ _DP_zfs=	md pthread umem util uutil m nvpair avl bsdxml geom nvpair z \
 		zfs_core
 _DP_zfs_core=	nvpair
 _DP_zpool=	md pthread z nvpair avl umem
+.if ${MK_OFED} != "no"
+_DP_cxgb4=	ibverbs pthread
+_DP_ibcm=	ibverbs
+_DP_ibmad=	ibcommon ibumad
+_DP_ibumad=	ibcommon
+_DP_mlx4=	ibverbs pthread
+_DP_mthca=	ibverbs pthread
+_DP_opensm=	pthread
+_DP_osmcomp=	pthread
+_DP_osmvendor=	ibumad opensm osmcomp pthread
+_DP_rdmacm=	ibverbs
+.endif
 
 # Define special cases
 LDADD_supcplusplus=	-lsupc++
-LIBATF_C=	${DESTDIR}${LIBDIR}/libprivateatf-c.a
-LIBATF_CXX=	${DESTDIR}${LIBDIR}/libprivateatf-c++.a
+LIBATF_C=	${LIBDESTDIR}${LIBDIR_BASE}/libprivateatf-c.a
+LIBATF_CXX=	${LIBDESTDIR}${LIBDIR_BASE}/libprivateatf-c++.a
 LDADD_atf_c=	-lprivateatf-c
 LDADD_atf_cxx=	-lprivateatf-c++
 
 .for _l in ${_PRIVATELIBS}
-LIB${_l:tu}?=	${DESTDIR}${LIBDIR}/libprivate${_l}.a
+LIB${_l:tu}?=	${LIBDESTDIR}${LIBDIR_BASE}/libprivate${_l}.a
 .endfor
 
 .for _l in ${_LIBRARIES}
@@ -384,7 +421,7 @@ LIBSMDBDIR=	${OBJTOP}/lib/libsmdb
 LIBSMDB?=	${LIBSMDBDIR}/libsmdb.a
 
 LIBSMUTILDIR=	${OBJTOP}/lib/libsmutil
-LIBSMUTIL?=	${LIBSMDBDIR}/libsmutil.a
+LIBSMUTIL?=	${LIBSMUTILDIR}/libsmutil.a
 
 LIBNETBSDDIR?=	${OBJTOP}/lib/libnetbsd
 LIBNETBSD?=	${LIBNETBSDDIR}/libnetbsd.a
@@ -417,16 +454,16 @@ LIBPARSEDIR=	${OBJTOP}/usr.sbin/ntp/libparse
 LIBPARSE?=	${LIBPARSEDIR}/libparse.a
 
 LIBLPRDIR=	${OBJTOP}/usr.sbin/lpr/common_source
-LIBLPR?=	${LIBOPTSDIR}/liblpr.a
+LIBLPR?=	${LIBLPRDIR}/liblpr.a
 
 LIBFIFOLOGDIR=	${OBJTOP}/usr.sbin/fifolog/lib
-LIBFIFOLOG?=	${LIBOPTSDIR}/libfifolog.a
+LIBFIFOLOG?=	${LIBFIFOLOGDIR}/libfifolog.a
 
 LIBBSNMPTOOLSDIR=	${OBJTOP}/usr.sbin/bsnmpd/tools/libbsnmptools
 LIBBSNMPTOOLS?=	${LIBBSNMPTOOLSDIR}/libbsnmptools.a
 
 LIBAMUDIR=	${OBJTOP}/usr.sbin/amd/libamu
-LIBAMU?=	${LIBAMUDIR}/libamu/libamu.a
+LIBAMU?=	${LIBAMUDIR}/libamu.a
 
 # Define a directory for each library.  This is useful for adding -L in when
 # not using a --sysroot or for meta mode bootstrapping when there is no
@@ -477,9 +514,18 @@ LIBKDCDIR=	${OBJTOP}/kerberos5/lib/libkdc
 LIBKRB5DIR=	${OBJTOP}/kerberos5/lib/libkrb5
 LIBROKENDIR=	${OBJTOP}/kerberos5/lib/libroken
 LIBWINDDIR=	${OBJTOP}/kerberos5/lib/libwind
+LIBATF_CDIR=	${OBJTOP}/lib/atf/libatf-c
+LIBATF_CXXDIR=	${OBJTOP}/lib/atf/libatf-c++
 LIBALIASDIR=	${OBJTOP}/lib/libalias/libalias
+LIBBLACKLISTDIR=	${OBJTOP}/lib/libblacklist
 LIBBLOCKSRUNTIMEDIR=	${OBJTOP}/lib/libblocksruntime
 LIBBSNMPDIR=	${OBJTOP}/lib/libbsnmp/libbsnmp
+LIBCASPERDIR=	${OBJTOP}/lib/libcasper/libcasper
+LIBCAP_DNSDIR=	${OBJTOP}/lib/libcasper/services/cap_dns
+LIBCAP_GRPDIR=	${OBJTOP}/lib/libcasper/services/cap_grp
+LIBCAP_PWDDIR=	${OBJTOP}/lib/libcasper/services/cap_pwd
+LIBCAP_RANDOMDIR=	${OBJTOP}/lib/libcasper/services/cap_random
+LIBCAP_SYSCTLDIR=	${OBJTOP}/lib/libcasper/services/cap_sysctl
 LIBBSDXMLDIR=	${OBJTOP}/lib/libexpat
 LIBKVMDIR=	${OBJTOP}/lib/libkvm
 LIBPTHREADDIR=	${OBJTOP}/lib/libthr

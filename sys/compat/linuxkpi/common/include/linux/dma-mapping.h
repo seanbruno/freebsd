@@ -47,7 +47,6 @@
 #include <vm/pmap.h>
 
 #include <machine/bus.h>
-#include <machine/pmap.h>
 
 enum dma_data_direction {
 	DMA_BIDIRECTIONAL = 0,
@@ -116,7 +115,7 @@ dma_set_coherent_mask(struct device *dev, u64 mask)
 
 	if (!dma_supported(dev, mask))
 		return -EIO;
-	/* XXX Currently we don't support a seperate coherent mask. */
+	/* XXX Currently we don't support a separate coherent mask. */
 	return 0;
 }
 
@@ -130,8 +129,10 @@ dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *dma_handle,
 
 	if (dev->dma_mask)
 		high = *dev->dma_mask;
-	else
+	else if (flag & GFP_DMA32)
 		high = BUS_SPACE_MAXADDR_32BIT;
+	else
+		high = BUS_SPACE_MAXADDR;
 	align = PAGE_SIZE << get_order(size);
 	mem = (void *)kmem_alloc_contig(kmem_arena, size, flag, 0, high, align,
 	    0, VM_MEMATTR_DEFAULT);

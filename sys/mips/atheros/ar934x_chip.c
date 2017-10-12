@@ -315,6 +315,10 @@ ar934x_chip_reset_ethernet_switch(void)
 	DELAY(100);
 	ar71xx_device_start(AR934X_RESET_ETH_SWITCH);
 	DELAY(100);
+	ar71xx_device_stop(AR934X_RESET_ETH_SWITCH_ANALOG);
+	DELAY(100);
+	ar71xx_device_start(AR934X_RESET_ETH_SWITCH_ANALOG);
+	DELAY(100);
 }
 
 static void
@@ -437,7 +441,7 @@ ar934x_chip_gpio_output_configure(int gpio, uint8_t func)
 	if (gpio > AR934X_GPIO_COUNT)
 		return;
 
-	reg = AR934X_GPIO_REG_OUT_FUNC0 + 4 * (gpio / 4);
+	reg = AR934X_GPIO_REG_OUT_FUNC0 + rounddown(gpio, 4);
 	s = 8 * (gpio % 4);
 
 	/* read-modify-write */

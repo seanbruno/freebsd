@@ -43,7 +43,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/resource.h>
 #include <vm/vm.h>          // 1. for vtophys
 #include <vm/pmap.h>        // 2. for vtophys
-#include <machine/pmap.h>   // 3. for vtophys (yes, three)
 #include <dev/pci/pcivar.h> // For pci_get macros
 #include <dev/pci/pcireg.h>
 #include <sys/endian.h>
@@ -1839,9 +1838,9 @@ static void agtiapi_cam_action( struct cam_sim *sim, union ccb * ccb )
     cpi->max_lun = AGTIAPI_MAX_LUN;
     cpi->maxio = 1024 *1024; /* Max supported I/O size, in bytes. */
     cpi->initiator_id = 255;
-    strncpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
-    strncpy(cpi->hba_vid, "PMC", HBA_IDLEN);
-    strncpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
+    strlcpy(cpi->sim_vid, "FreeBSD", SIM_IDLEN);
+    strlcpy(cpi->hba_vid, "PMC", HBA_IDLEN);
+    strlcpy(cpi->dev_name, cam_sim_name(sim), DEV_IDLEN);
     cpi->unit_number = cam_sim_unit(sim);
     cpi->bus_id = cam_sim_bus(sim);
     // rate is set when XPT_GET_TRAN_SETTINGS is processed
@@ -3750,7 +3749,7 @@ static void agtiapi_PrepareSMPSGListCB( void *arg,
     return;
   }
   /* TODO: add indirect handling */
-  /* set the flag correctly based on Indiret SMP request and responce */
+  /* set the flag correctly based on Indiret SMP request and response */
 
   AGTIAPI_PRINTK( "agtiapi_PrepareSMPSGListCB: send ccb pccb->devHandle %p, "
                   "pccb->targetId %d TID %d pmcsc->devDiscover %d card %p\n",
@@ -5033,7 +5032,7 @@ STATIC void agtiapi_PrepCCBs( struct agtiapi_softc *pCard,
 
   int i;
   U32 hdr_sz, ccb_sz;
-  ccb_t *pccb = 0;
+  ccb_t *pccb = NULL;
   int offset = 0;
   int nsegs = 0;
   int sgl_sz = 0;
@@ -5050,8 +5049,8 @@ STATIC void agtiapi_PrepCCBs( struct agtiapi_softc *pCard,
                   sizeof(tiSgl_t),
                   max_ccb );
 
-  ccb_sz = (AGTIAPI_CCB_SIZE + cache_line_size() - 1) & ~(cache_line_size() -1);
-  hdr_sz = (sizeof(*hdr) + cache_line_size() - 1) & ~(cache_line_size() - 1);
+  ccb_sz = roundup2(AGTIAPI_CCB_SIZE, cache_line_size());
+  hdr_sz = roundup2(sizeof(*hdr), cache_line_size());
 
   AGTIAPI_PRINTK("agtiapi_PrepCCBs: after cache line\n");
 
@@ -5160,7 +5159,7 @@ STATIC U32 agtiapi_InitCCBs(struct agtiapi_softc *pCard, int tgtCount, int tid)
 
   U32   max_ccb, size, ccb_sz, hdr_sz;
   int   no_allocs = 0, i;
-  ccb_hdr_t  *hdr = 0;
+  ccb_hdr_t  *hdr = NULL;
 
   AGTIAPI_PRINTK("agtiapi_InitCCBs: start\n");
   AGTIAPI_PRINTK("agtiapi_InitCCBs: tgtCount %d tid %d\n", tgtCount, tid);
@@ -5175,9 +5174,8 @@ STATIC U32 agtiapi_InitCCBs(struct agtiapi_softc *pCard, int tgtCount, int tid)
 #endif
 
   max_ccb = tgtCount * AGTIAPI_CCB_PER_DEVICE;//      / 4; // TBR
-  ccb_sz = ( (AGTIAPI_CCB_SIZE + cache_line_size() - 1) &
-             ~(cache_line_size() -1) );
-  hdr_sz = (sizeof(*hdr) + cache_line_size() - 1) & ~(cache_line_size() - 1);
+  ccb_sz = roundup2(AGTIAPI_CCB_SIZE, cache_line_size());
+  hdr_sz = roundup2(sizeof(*hdr), cache_line_size());
   size = ccb_sz * max_ccb + hdr_sz;
   
   for (i = 0; i < (1 << no_allocs); i++) 
@@ -5397,7 +5395,7 @@ STATIC U32 agtiapi_GetDevHandle( struct agtiapi_softc *pCard,
 
   for ( devIdx = 0; devIdx < pCard->devDiscover; devIdx++ )
   {
-    if ( agDev[devIdx] != 0 )
+    if ( agDev[devIdx] != NULL )
     {
       // AGTIAPI_PRINTK( "agtiapi_GetDevHandle: agDev %d not NULL %p\n",
       //                 devIdx, agDev[devIdx] );
@@ -5813,7 +5811,7 @@ agtiapi_ReleaseCCBs()
 Purpose:
   Free all allocated CCB memories for the Host Adapter.
 Parameters:
-  struct agtiapi_softc *pCard (IN)  Pointer to HBA data stucture
+  struct agtiapi_softc *pCard (IN)  Pointer to HBA data structure
 Return:
 Note:
 ******************************************************************************/
@@ -5822,7 +5820,7 @@ STATIC void agtiapi_ReleaseCCBs( struct agtiapi_softc *pCard )
 
   ccb_hdr_t *hdr;
   U32 hdr_sz;
-  ccb_t *pccb = 0;
+  ccb_t *pccb = NULL;
 
   AGTIAPI_PRINTK( "agtiapi_ReleaseCCBs: start\n" );
 
@@ -5855,7 +5853,7 @@ STATIC void agtiapi_ReleaseCCBs( struct agtiapi_softc *pCard )
   while ((hdr = pCard->ccbAllocList) != NULL)
   {
     pCard->ccbAllocList = hdr->next;
-    hdr_sz = (sizeof(*hdr) + cache_line_size() - 1) & ~(cache_line_size() - 1);
+    hdr_sz = roundup2(sizeof(*hdr), cache_line_size());
     pccb = (ccb_t*) ((char*)hdr + hdr_sz);
     if (pCard->buffer_dmat != NULL && pccb->CCB_dmamap != NULL)
     {

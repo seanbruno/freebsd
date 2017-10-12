@@ -251,6 +251,7 @@ boolean_t moea64_is_referenced(mmu_t, vm_page_t);
 int moea64_ts_referenced(mmu_t, vm_page_t);
 vm_offset_t moea64_map(mmu_t, vm_offset_t *, vm_paddr_t, vm_paddr_t, int);
 boolean_t moea64_page_exists_quick(mmu_t, pmap_t, vm_page_t);
+void moea64_page_init(mmu_t, vm_page_t);
 int moea64_page_wired_mappings(mmu_t, vm_page_t);
 void moea64_pinit(mmu_t, pmap_t);
 void moea64_pinit0(mmu_t, pmap_t);
@@ -265,7 +266,6 @@ void moea64_remove_write(mmu_t, vm_page_t);
 void moea64_unwire(mmu_t, pmap_t, vm_offset_t, vm_offset_t);
 void moea64_zero_page(mmu_t, vm_page_t);
 void moea64_zero_page_area(mmu_t, vm_page_t, int, int);
-void moea64_zero_page_idle(mmu_t, vm_page_t);
 void moea64_activate(mmu_t, struct thread *);
 void moea64_deactivate(mmu_t, struct thread *);
 void *moea64_mapdev(mmu_t, vm_paddr_t, vm_size_t);
@@ -299,6 +299,7 @@ static mmu_method_t moea64_methods[] = {
 	MMUMETHOD(mmu_ts_referenced,	moea64_ts_referenced),
 	MMUMETHOD(mmu_map,     		moea64_map),
 	MMUMETHOD(mmu_page_exists_quick,moea64_page_exists_quick),
+	MMUMETHOD(mmu_page_init,	moea64_page_init),
 	MMUMETHOD(mmu_page_wired_mappings,moea64_page_wired_mappings),
 	MMUMETHOD(mmu_pinit,		moea64_pinit),
 	MMUMETHOD(mmu_pinit0,		moea64_pinit0),
@@ -314,7 +315,6 @@ static mmu_method_t moea64_methods[] = {
 	MMUMETHOD(mmu_unwire,		moea64_unwire),
 	MMUMETHOD(mmu_zero_page,       	moea64_zero_page),
 	MMUMETHOD(mmu_zero_page_area,	moea64_zero_page_area),
-	MMUMETHOD(mmu_zero_page_idle,	moea64_zero_page_idle),
 	MMUMETHOD(mmu_activate,		moea64_activate),
 	MMUMETHOD(mmu_deactivate,      	moea64_deactivate),
 	MMUMETHOD(mmu_page_set_memattr,	moea64_page_set_memattr),
@@ -434,6 +434,8 @@ moea64_calc_wimg(vm_paddr_t pa, vm_memattr_t ma)
 		switch (ma) {
 		case VM_MEMATTR_UNCACHEABLE:
 			return (LPTE_I | LPTE_G);
+		case VM_MEMATTR_CACHEABLE:
+			return (LPTE_M);
 		case VM_MEMATTR_WRITE_COMBINING:
 		case VM_MEMATTR_WRITE_BACK:
 		case VM_MEMATTR_PREFETCHABLE:
@@ -1228,13 +1230,6 @@ moea64_zero_page(mmu_t mmu, vm_page_t m)
 		mtx_unlock(&moea64_scratchpage_mtx);
 }
 
-void
-moea64_zero_page_idle(mmu_t mmu, vm_page_t m)
-{
-
-	moea64_zero_page(mmu, m);
-}
-
 vm_offset_t
 moea64_quick_enter_page(mmu_t mmu, vm_page_t m)
 {
@@ -1905,6 +1900,15 @@ moea64_page_exists_quick(mmu_t mmu, pmap_t pmap, vm_page_t m)
 	return (rv);
 }
 
+void
+moea64_page_init(mmu_t mmu __unused, vm_page_t m)
+{
+
+	m->md.mdpg_attrs = 0;
+	m->md.mdpg_cache_attrs = VM_MEMATTR_DEFAULT;
+	LIST_INIT(&m->md.mdpg_pvoh);
+}
+
 /*
  * Return the number of managed mappings to the given physical page
  * that are wired.
@@ -1964,7 +1968,7 @@ moea64_get_unique_vsid(void) {
 			}
 			i = ffs(~moea64_vsid_bitmap[n]) - 1;
 			mask = 1 << i;
-			hash &= VSID_HASHMASK & ~(VSID_NBPW - 1);
+			hash &= rounddown2(VSID_HASHMASK, VSID_NBPW);
 			hash |= i;
 		}
 		if (hash == VSID_VRMA)	/* also special, avoid this too */
@@ -2294,7 +2298,7 @@ moea64_bootstrap_alloc(vm_size_t size, u_int align)
 	size = round_page(size);
 	for (i = 0; phys_avail[i + 1] != 0; i += 2) {
 		if (align != 0)
-			s = (phys_avail[i] + align - 1) & ~(align - 1);
+			s = roundup2(phys_avail[i], align);
 		else
 			s = phys_avail[i];
 		e = s + size;

@@ -34,6 +34,8 @@
 
 enum {
 	NCHAN           = 4,     /* # of HW channels */
+	T6_NCHAN        = 2,
+	MAX_NCHAN       = 4,
 	MAX_MTU         = 9600,  /* max MAC MTU, excluding header + FCS */
 	EEPROMSIZE      = 17408, /* Serial EEPROM physical size */
 	EEPROMVSIZE     = 32768, /* Serial EEPROM virtual address space size */
@@ -44,6 +46,8 @@ enum {
 	NCCTRL_WIN      = 32,    /* # of congestion control windows */
 	NTX_SCHED       = 8,     /* # of HW Tx scheduling queues */
 	PM_NSTATS       = 5,     /* # of PM stats */
+	T6_PM_NSTATS    = 7,
+	MAX_PM_NSTATS   = 7,
 	MBOX_LEN        = 64,    /* mailbox size in bytes */
 	NTRACE          = 4,     /* # of tracing filters */
 	TRACE_LEN       = 112,   /* length of trace data and mask */
@@ -272,8 +276,17 @@ enum {
 	FLASH_MIN_SIZE = FLASH_CFG_START + FLASH_CFG_MAX_SIZE,
 
 	/*
-	 * Sectors 32-63 are reserved for FLASH failover.
+	 * Sectors 32-63 for CUDBG.
 	 */
+	FLASH_CUDBG_START_SEC = 32,
+	FLASH_CUDBG_NSECS = 32,
+	FLASH_CUDBG_START = FLASH_START(FLASH_CUDBG_START_SEC),
+	FLASH_CUDBG_MAX_SIZE = FLASH_MAX_SIZE(FLASH_CUDBG_NSECS),
+
+	/*
+	 * Size of defined FLASH regions.
+	 */
+	FLASH_END_SEC = 64,
 };
 
 #undef FLASH_START

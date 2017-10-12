@@ -45,7 +45,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -92,6 +92,7 @@ __FBSDID("$FreeBSD$");
 
 #include <net/if.h>
 #include <net/if_var.h>
+#include <net/if_llatbl.h>
 #include <net/if_types.h>
 #include <net/route.h>
 
@@ -112,7 +113,7 @@ static struct inpcb *in6_pcblookup_hash_locked(struct inpcbinfo *,
     struct in6_addr *, u_int, struct in6_addr *, u_int, int, struct ifnet *);
 
 int
-in6_pcbbind(register struct inpcb *inp, struct sockaddr *nam,
+in6_pcbbind(struct inpcb *inp, struct sockaddr *nam,
     struct ucred *cred)
 {
 	struct socket *so = inp->inp_socket;
@@ -323,10 +324,10 @@ in6_pcbbind(register struct inpcb *inp, struct sockaddr *nam,
  *   have forced minor changes in every protocol).
  */
 static int
-in6_pcbladdr(register struct inpcb *inp, struct sockaddr *nam,
+in6_pcbladdr(struct inpcb *inp, struct sockaddr *nam,
     struct in6_addr *plocal_addr6)
 {
-	register struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
 	int error = 0;
 	int scope_ambiguous = 0;
 	struct in6_addr in6a;
@@ -388,11 +389,11 @@ in6_pcbladdr(register struct inpcb *inp, struct sockaddr *nam,
  * then pick one.
  */
 int
-in6_pcbconnect_mbuf(register struct inpcb *inp, struct sockaddr *nam,
+in6_pcbconnect_mbuf(struct inpcb *inp, struct sockaddr *nam,
     struct ucred *cred, struct mbuf *m)
 {
 	struct inpcbinfo *pcbinfo = inp->inp_pcbinfo;
-	register struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
 	struct in6_addr addr6;
 	int error;
 
@@ -493,7 +494,7 @@ in6_v4mapsin6_sockaddr(in_port_t port, struct in_addr *addr_p)
 int
 in6_getsockaddr(struct socket *so, struct sockaddr **nam)
 {
-	register struct inpcb *inp;
+	struct inpcb *inp;
 	struct in6_addr addr;
 	in_port_t port;
 
@@ -686,7 +687,7 @@ struct inpcb *
 in6_pcblookup_local(struct inpcbinfo *pcbinfo, struct in6_addr *laddr,
     u_short lport, int lookupflags, struct ucred *cred)
 {
-	register struct inpcb *inp;
+	struct inpcb *inp;
 	int matchwild = 3, wildcard;
 
 	KASSERT((lookupflags & ~(INPLOOKUP_WILDCARD)) == 0,
@@ -827,9 +828,12 @@ void
 in6_losing(struct inpcb *in6p)
 {
 
-	/*
-	 * We don't store route pointers in the routing table anymore
-	 */
+	if (in6p->inp_route6.ro_rt) {
+		RTFREE(in6p->inp_route6.ro_rt);
+		in6p->inp_route6.ro_rt = (struct rtentry *)NULL;
+	}
+	if (in6p->inp_route.ro_lle)
+		LLE_FREE(in6p->inp_route.ro_lle);	/* zeros ro_lle */
 	return;
 }
 
@@ -840,9 +844,13 @@ in6_losing(struct inpcb *in6p)
 struct inpcb *
 in6_rtchange(struct inpcb *inp, int errno)
 {
-	/*
-	 * We don't store route pointers in the routing table anymore
-	 */
+
+	if (inp->inp_route6.ro_rt) {
+		RTFREE(inp->inp_route6.ro_rt);
+		inp->inp_route6.ro_rt = (struct rtentry *)NULL;
+	}
+	if (inp->inp_route.ro_lle)
+		LLE_FREE(inp->inp_route.ro_lle);	/* zeros ro_lle */
 	return inp;
 }
 
@@ -1259,7 +1267,7 @@ in6_pcblookup_mbuf(struct inpcbinfo *pcbinfo, struct in6_addr *faddr,
 }
 
 void
-init_sin6(struct sockaddr_in6 *sin6, struct mbuf *m)
+init_sin6(struct sockaddr_in6 *sin6, struct mbuf *m, int srcordst)
 {
 	struct ip6_hdr *ip;
 
@@ -1267,7 +1275,7 @@ init_sin6(struct sockaddr_in6 *sin6, struct mbuf *m)
 	bzero(sin6, sizeof(*sin6));
 	sin6->sin6_len = sizeof(*sin6);
 	sin6->sin6_family = AF_INET6;
-	sin6->sin6_addr = ip->ip6_src;
+	sin6->sin6_addr = srcordst ? ip->ip6_dst : ip->ip6_src;
 
 	(void)sa6_recoverscope(sin6); /* XXX: should catch errors... */
 

@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,6 +47,49 @@ __FBSDID("$FreeBSD$");
 #include <sys/domain.h>
 #include <sys/protosw.h>
 #include <sys/uio.h>
+#include <sys/sdt.h>
+
+SDT_PROBE_DEFINE5_XLATE(sdt, , , m__init,
+    "struct mbuf *", "mbufinfo_t *",
+    "uint32_t", "uint32_t",
+    "uint16_t", "uint16_t",
+    "uint32_t", "uint32_t",
+    "uint32_t", "uint32_t");
+
+SDT_PROBE_DEFINE3_XLATE(sdt, , , m__gethdr,
+    "uint32_t", "uint32_t",
+    "uint16_t", "uint16_t",
+    "struct mbuf *", "mbufinfo_t *");
+
+SDT_PROBE_DEFINE3_XLATE(sdt, , , m__get,
+    "uint32_t", "uint32_t",
+    "uint16_t", "uint16_t",
+    "struct mbuf *", "mbufinfo_t *");
+
+SDT_PROBE_DEFINE4_XLATE(sdt, , , m__getcl,
+    "uint32_t", "uint32_t",
+    "uint16_t", "uint16_t",
+    "uint32_t", "uint32_t",
+    "struct mbuf *", "mbufinfo_t *");
+
+SDT_PROBE_DEFINE3_XLATE(sdt, , , m__clget,
+    "struct mbuf *", "mbufinfo_t *",
+    "uint32_t", "uint32_t",
+    "uint32_t", "uint32_t");
+
+SDT_PROBE_DEFINE4_XLATE(sdt, , , m__cljget,
+    "struct mbuf *", "mbufinfo_t *",
+    "uint32_t", "uint32_t",
+    "uint32_t", "uint32_t",
+    "void*", "void*");
+
+SDT_PROBE_DEFINE(sdt, , , m__cljset);
+
+SDT_PROBE_DEFINE1_XLATE(sdt, , , m__free,
+        "struct mbuf *", "mbufinfo_t *");
+
+SDT_PROBE_DEFINE1_XLATE(sdt, , , m__freem,
+    "struct mbuf *", "mbufinfo_t *");
 
 #include <security/mac/mac_framework.h>
 
@@ -126,7 +169,7 @@ CTASSERT(sizeof(struct m_ext) == 28);
  * plain pointer does.
  */
 #ifdef INVARIANTS
-static struct mbuf m_assertbuf;
+static struct mbuf __used m_assertbuf;
 CTASSERT(sizeof(m_assertbuf.m_slist) == sizeof(m_assertbuf.m_next));
 CTASSERT(sizeof(m_assertbuf.m_stailq) == sizeof(m_assertbuf.m_next));
 CTASSERT(sizeof(m_assertbuf.m_slistpkt) == sizeof(m_assertbuf.m_nextpkt));
@@ -138,29 +181,41 @@ CTASSERT(sizeof(m_assertbuf.m_stailqpkt) == sizeof(m_assertbuf.m_nextpkt));
  * and bump the refcount of the cluster.
  */
 void
-mb_dupcl(struct mbuf *n, const struct mbuf *m)
+mb_dupcl(struct mbuf *n, struct mbuf *m)
 {
+	volatile u_int *refcnt;
 
 	KASSERT(m->m_flags & M_EXT, ("%s: M_EXT not set on %p", __func__, m));
 	KASSERT(!(n->m_flags & M_EXT), ("%s: M_EXT set on %p", __func__, n));
 
-	switch (m->m_ext.ext_type) {
-	case EXT_SFBUF:
-	case EXT_SFBUF_NOCACHE:
-		sf_ext_ref(m->m_ext.ext_arg1, m->m_ext.ext_arg2);
-		break;
-	default:
-		KASSERT(m->m_ext.ext_cnt != NULL,
-		    ("%s: no refcounting pointer on %p", __func__, m));
-		if (*(m->m_ext.ext_cnt) == 1)
-			*(m->m_ext.ext_cnt) += 1;
-		else
-			atomic_add_int(m->m_ext.ext_cnt, 1);
-	}
-
-	n->m_ext = m->m_ext;
+	/*
+	 * Cache access optimization.  For most kinds of external
+	 * storage we don't need full copy of m_ext, since the
+	 * holder of the 'ext_count' is responsible to carry the
+	 * free routine and its arguments.  Exclusion is EXT_EXTREF,
+	 * where 'ext_cnt' doesn't point into mbuf at all.
+	 */
+	if (m->m_ext.ext_type == EXT_EXTREF)
+		bcopy(&m->m_ext, &n->m_ext, sizeof(struct m_ext));
+	else
+		bcopy(&m->m_ext, &n->m_ext, m_ext_copylen);
 	n->m_flags |= M_EXT;
 	n->m_flags |= m->m_flags & M_RDONLY;
+
+	/* See if this is the mbuf that holds the embedded refcount. */
+	if (m->m_ext.ext_flags & EXT_FLAG_EMBREF) {
+		refcnt = n->m_ext.ext_cnt = &m->m_ext.ext_count;
+		n->m_ext.ext_flags &= ~EXT_FLAG_EMBREF;
+	} else {
+		KASSERT(m->m_ext.ext_cnt != NULL,
+		    ("%s: no refcounting pointer on %p", __func__, m));
+		refcnt = m->m_ext.ext_cnt;
+	}
+
+	if (*refcnt == 1)
+		*refcnt += 1;
+	else
+		atomic_add_int(refcnt, 1);
 }
 
 void
@@ -394,7 +449,7 @@ m_prepend(struct mbuf *m, int len, int how)
  * only their reference counts are incremented.
  */
 struct mbuf *
-m_copym(const struct mbuf *m, int off0, int len, int wait)
+m_copym(struct mbuf *m, int off0, int len, int wait)
 {
 	struct mbuf *n, **np;
 	int off = off0;
@@ -414,7 +469,7 @@ m_copym(const struct mbuf *m, int off0, int len, int wait)
 		m = m->m_next;
 	}
 	np = &top;
-	top = 0;
+	top = NULL;
 	while (len > 0) {
 		if (m == NULL) {
 			KASSERT(len == M_COPYALL,
@@ -939,7 +994,7 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 				len = MHLEN;
 
 				/* Place initial small packet/header at end of mbuf */
-				if (m && totlen + off + max_linkhdr <= MLEN) {
+				if (m && totlen + off + max_linkhdr <= MHLEN) {
 					m->m_data += max_linkhdr;
 					len -= max_linkhdr;
 				}
@@ -1291,7 +1346,7 @@ nospace:
 /*
  * Defragment an mbuf chain, returning at most maxfrags separate
  * mbufs+clusters.  If this is not possible NULL is returned and
- * the original mbuf chain is left in it's present (potentially
+ * the original mbuf chain is left in its present (potentially
  * modified) state.  We use two techniques: collapsing consecutive
  * mbufs and replacing consecutive mbufs by a cluster.
  *
@@ -1472,7 +1527,7 @@ m_uiotombuf(struct uio *uio, int how, int len, int align, int flags)
 	 * the total data supplied by the uio.
 	 */
 	if (len > 0)
-		total = min(uio->uio_resid, len);
+		total = (uio->uio_resid < len) ? uio->uio_resid : len;
 	else
 		total = uio->uio_resid;
 
@@ -1516,7 +1571,7 @@ m_uiotombuf(struct uio *uio, int how, int len, int align, int flags)
  * Copy an mbuf chain into a uio limited by len if set.
  */
 int
-m_mbuftouio(struct uio *uio, struct mbuf *m, int len)
+m_mbuftouio(struct uio *uio, const struct mbuf *m, int len)
 {
 	int error, length, total;
 	int progress = 0;
@@ -1625,7 +1680,7 @@ m_unshare(struct mbuf *m0, int how)
 		 * don't know how to break up the non-contiguous memory when
 		 * doing DMA.
 		 */
-		n = m_getcl(how, m->m_type, m->m_flags);
+		n = m_getcl(how, m->m_type, m->m_flags & M_COPYFLAGS);
 		if (n == NULL) {
 			m_freem(m0);
 			return (NULL);
@@ -1655,7 +1710,7 @@ m_unshare(struct mbuf *m0, int how)
 				break;
 			off += cc;
 
-			n = m_getcl(how, m->m_type, m->m_flags);
+			n = m_getcl(how, m->m_type, m->m_flags & M_COPYFLAGS);
 			if (n == NULL) {
 				m_freem(mfirst);
 				m_freem(m0);

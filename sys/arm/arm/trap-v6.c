@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/signalvar.h>
 #include <sys/ktr.h>
+#include <sys/vmmeter.h>
 #ifdef KTRACE
 #include <sys/uio.h>
 #include <sys/ktrace.h>
@@ -53,12 +54,10 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_extern.h>
 #include <vm/vm_param.h>
 
-#include <machine/acle-compat.h>
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/machdep.h>
 #include <machine/pcb.h>
-#include <machine/vmparam.h>
 
 #ifdef KDB
 #include <sys/kdb.h>
@@ -292,7 +291,7 @@ abort_handler(struct trapframe *tf, int prefetch)
 	void *onfault;
 #endif
 
-	PCPU_INC(cnt.v_trap);
+	VM_CNT_INC(v_trap);
 	td = curthread;
 
 	fsr = (prefetch) ? cp15_ifsr_get(): cp15_dfsr_get();

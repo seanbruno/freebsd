@@ -2,12 +2,16 @@
 
 # Use the following command to build local debug version of dynamic
 # linker:
-# make DEBUG_FLAGS=-g DEBUG=-DDEBUG MK_TESTS=no all
+# make DEBUG_FLAGS=-g DEBUG=-DDEBUG WITHOUT_TESTS=yes all
 
 .include <src.opts.mk>
+PACKAGE=	clibs
 MK_SSP=		no
 
 PROG?=		ld-elf.so.1
+.if (${PROG:M*ld-elf32*} != "")
+TAGS+=		lib32
+.endif
 SRCS=		rtld_start.S \
 		reloc.c rtld.c rtld_lock.c rtld_printf.c map_object.c \
 		malloc.c xmalloc.c debug.c libmap.c
@@ -30,7 +34,7 @@ WARNS?=		2
 INSTALLFLAGS=	-C -b
 PRECIOUSPROG=
 BINDIR=		/libexec
-SYMLINKS=	${BINDIR}/${PROG} ${LIBEXECDIR}/${PROG}
+SYMLINKS=	../..${BINDIR}/${PROG} ${LIBEXECDIR}/${PROG}
 MLINKS=		rtld.1 ld-elf.so.1.1 \
 		rtld.1 ld.so.1
 
@@ -43,8 +47,14 @@ CFLAGS+=	-DPIC $(DEBUG)
 .if ${MACHINE_CPUARCH} == "amd64" || ${MACHINE_CPUARCH} == "i386"
 CFLAGS+=	-fvisibility=hidden
 .endif
-LDFLAGS+=	-shared -Wl,-Bsymbolic
+.if ${MACHINE_CPUARCH} == "mips"
+CFLAGS.reloc.c+=-fno-jump-tables
+.endif
+LDFLAGS+=	-shared -Wl,-Bsymbolic -Wl,-z,defs
 LIBADD=		c_pic
+.if ${MK_TOOLCHAIN} == "no"
+LDFLAGS+=	-L${LIBCDIR}
+.endif
 
 .if ${MACHINE_CPUARCH} == "arm"
 # Some of the required math functions (div & mod) are implemented in
@@ -62,8 +72,6 @@ SYMBOL_MAPS=	${.CURDIR}/Symbol.map
 VERSION_MAP=	Version.map
 LDFLAGS+=	-Wl,--version-script=${VERSION_MAP}
 
-${PROG}:	${VERSION_MAP}
-
 .if exists(${.CURDIR}/${RTLD_ARCH}/Symbol.map)
 SYMBOL_MAPS+=	${.CURDIR}/${RTLD_ARCH}/Symbol.map
 .endif
@@ -80,9 +88,9 @@ beforeinstall:
 
 .PATH: ${.CURDIR}/${RTLD_ARCH}
 
-.if ${MK_TESTS} != "no"
-SUBDIR+=	tests
-.endif
+HAS_TESTS=
+SUBDIR.${MK_TESTS}+= tests
 
 .include <bsd.prog.mk>
+${PROG_FULL}:	${VERSION_MAP}
 .include <bsd.symver.mk>

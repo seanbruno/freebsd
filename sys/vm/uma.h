@@ -242,7 +242,7 @@ uma_zone_t uma_zcache_create(char *name, int size, uma_ctor ctor, uma_dtor dtor,
  * Definitions for uma_zcreate flags
  *
  * These flags share space with UMA_ZFLAGs in uma_int.h.  Be careful not to
- * overlap when adding new features.  0xf0000000 is in use by uma_int.h.
+ * overlap when adding new features.  0xff000000 is in use by uma_int.h.
  */
 #define UMA_ZONE_PAGEABLE	0x0001	/* Return items not fully backed by
 					   physical memory XXX Not yet */
@@ -262,7 +262,7 @@ uma_zone_t uma_zcache_create(char *name, int size, uma_ctor ctor, uma_dtor dtor,
 					 * information in the vm_page.
 					 */
 #define	UMA_ZONE_SECONDARY	0x0200	/* Zone is a Secondary Zone */
-#define	UMA_ZONE_REFCNT		0x0400	/* Allocate refcnts in slabs */
+/*				0x0400	   Unused */
 #define	UMA_ZONE_MAXBUCKET	0x0800	/* Use largest buckets */
 #define	UMA_ZONE_CACHESPREAD	0x1000	/*
 					 * Spread memory start locations across
@@ -276,7 +276,7 @@ uma_zone_t uma_zcache_create(char *name, int size, uma_ctor ctor, uma_dtor dtor,
 					 * mini-dumps.
 					 */
 #define	UMA_ZONE_PCPU		0x8000	/*
-					 * Allocates mp_ncpus slabs sized to
+					 * Allocates mp_maxid + 1 slabs sized to
 					 * sizeof(struct pcpu).
 					 */
 
@@ -287,7 +287,7 @@ uma_zone_t uma_zcache_create(char *name, int size, uma_ctor ctor, uma_dtor dtor,
  */
 #define	UMA_ZONE_INHERIT						\
     (UMA_ZONE_OFFPAGE | UMA_ZONE_MALLOC | UMA_ZONE_NOFREE |		\
-    UMA_ZONE_HASH | UMA_ZONE_REFCNT | UMA_ZONE_VTOSLAB | UMA_ZONE_PCPU)
+    UMA_ZONE_HASH | UMA_ZONE_VTOSLAB | UMA_ZONE_PCPU)
 
 /* Definitions for align */
 #define UMA_ALIGN_PTR	(sizeof(void *) - 1)	/* Alignment fit for ptr */
@@ -296,6 +296,7 @@ uma_zone_t uma_zcache_create(char *name, int size, uma_ctor ctor, uma_dtor dtor,
 #define UMA_ALIGN_SHORT	(sizeof(short) - 1)	/* "" short */
 #define UMA_ALIGN_CHAR	(sizeof(char) - 1)	/* "" char */
 #define UMA_ALIGN_CACHE	(0 - 1)			/* Cache line size align */
+#define	UMA_ALIGNOF(type) (_Alignof(type) - 1)	/* Alignment fit for 'type' */
 
 /*
  * Destroys an empty uma zone.  If the zone is not empty uma complains loudly.
@@ -621,21 +622,6 @@ void uma_zone_set_freef(uma_zone_t zone, uma_free freef);
  * NOTE: This is blocking and should only be done at startup
  */
 void uma_prealloc(uma_zone_t zone, int itemcnt);
-
-/*
- * Used to lookup the reference counter allocated for an item
- * from a UMA_ZONE_REFCNT zone.  For UMA_ZONE_REFCNT zones,
- * reference counters are allocated for items and stored in
- * the underlying slab header.
- *
- * Arguments:
- *	zone  The UMA_ZONE_REFCNT zone to which the item belongs.
- *	item  The address of the item for which we want a refcnt.
- *
- * Returns:
- *	A pointer to a uint32_t reference counter.
- */
-uint32_t *uma_find_refcnt(uma_zone_t zone, void *item);
 
 /*
  * Used to determine if a fixed-size zone is exhausted.

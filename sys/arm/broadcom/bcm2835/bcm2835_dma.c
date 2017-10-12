@@ -40,7 +40,6 @@ __FBSDID("$FreeBSD$");
 #include <sys/resource.h>
 #include <sys/rman.h>
 
-#include <dev/fdt/fdt_common.h>
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
@@ -48,8 +47,6 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <machine/bus.h>
-#include <machine/cpu.h>
-#include <machine/cpufunc.h>
 
 #include "bcm2835_dma.h"
 #include "bcm2835_vcbus.h"
@@ -153,6 +150,12 @@ struct bcm_dma_softc {
 
 static struct bcm_dma_softc *bcm_dma_sc = NULL;
 static uint32_t bcm_dma_channel_mask;
+
+static struct ofw_compat_data compat_data[] = {
+	{"broadcom,bcm2835-dma",	1},
+	{"brcm,bcm2835-dma",		1},
+	{NULL,				0}
+};
 
 static void
 bcm_dmamap_cb(void *arg, bus_dma_segment_t *segs,
@@ -278,7 +281,7 @@ bcm_dma_init(device_t dev)
 
 		/* 
 		 * Least alignment for busdma-allocated stuff is cache 
-		 * line size, so just make sure nothing stupid happend
+		 * line size, so just make sure nothing stupid happened
 		 * and we got properly aligned address
 		 */
 		if ((uintptr_t)cb_virt & 0x1f) {
@@ -539,7 +542,7 @@ bcm_dma_reg_dump(int ch)
  *     ch - channel number
  *     src, dst - source and destination address in
  *         ARM physical memory address space. 
- *     len - amount of bytes to be transfered
+ *     len - amount of bytes to be transferred
  *	  
  * Returns 0 on success, -1 otherwise
  */
@@ -658,7 +661,7 @@ bcm_dma_probe(device_t dev)
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
-	if (!ofw_bus_is_compatible(dev, "broadcom,bcm2835-dma"))
+	if (ofw_bus_search_compatible(dev, compat_data)->ocd_data == 0)
 		return (ENXIO);
 
 	device_set_desc(dev, "BCM2835 DMA Controller");

@@ -85,16 +85,16 @@ static dtrace_pattr_t sdt_attr = {
 };
 
 static dtrace_pops_t sdt_pops = {
-	sdt_provide_probes,
-	NULL,
-	sdt_enable,
-	sdt_disable,
-	NULL,
-	NULL,
-	sdt_getargdesc,
-	NULL,
-	NULL,
-	sdt_destroy,
+	.dtps_provide =		sdt_provide_probes,
+	.dtps_provide_module =	NULL,
+	.dtps_enable =		sdt_enable,
+	.dtps_disable =		sdt_disable,
+	.dtps_suspend =		NULL,
+	.dtps_resume =		NULL,
+	.dtps_getargdesc =	sdt_getargdesc,
+	.dtps_getargval =	NULL,
+	.dtps_usermode =	NULL,
+	.dtps_destroy =		sdt_destroy,
 };
 
 static TAILQ_HEAD(, sdt_provider) sdt_prov_list;
@@ -384,27 +384,19 @@ sdt_unload()
 static int
 sdt_modevent(module_t mod __unused, int type, void *data __unused)
 {
-	int error = 0;
 
 	switch (type) {
 	case MOD_LOAD:
-		sdt_load();
-		break;
-
 	case MOD_UNLOAD:
-		error = sdt_unload();
-		break;
-
 	case MOD_SHUTDOWN:
-		break;
-
+		return (0);
 	default:
-		error = EOPNOTSUPP;
-		break;
+		return (EOPNOTSUPP);
 	}
-
-	return (error);
 }
+
+SYSINIT(sdt_load, SI_SUB_DTRACE_PROVIDER, SI_ORDER_ANY, sdt_load, NULL);
+SYSUNINIT(sdt_unload, SI_SUB_DTRACE_PROVIDER, SI_ORDER_ANY, sdt_unload, NULL);
 
 DEV_MODULE(sdt, sdt_modevent, NULL);
 MODULE_VERSION(sdt, 1);

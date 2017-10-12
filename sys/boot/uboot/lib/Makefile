@@ -8,12 +8,10 @@ LIB=		uboot
 INTERNALLIB=
 WARNS?=		2
 
-SRCS=	crc32.c console.c copy.c devicename.c elf_freebsd.c glue.c
+SRCS=	console.c copy.c devicename.c elf_freebsd.c glue.c
 SRCS+=	module.c net.c reboot.c time.c
 
 CFLAGS+=	-ffreestanding -msoft-float
-
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
 
 .if !defined(LOADER_NO_DISK_SUPPORT)
 SRCS+=	disk.c
@@ -41,11 +39,12 @@ CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../.. -I.
 CFLAGS+= -DDISK_DEBUG
 .endif
 
-machine:
+machine: .NOMETA
 	ln -sf ${.CURDIR}/../../../${MACHINE_CPUARCH}/include machine
 
 CLEANFILES+=	machine
 
+.include <bsd.stand.mk>
 .include <bsd.lib.mk>
 
 beforedepend ${OBJS}: machine

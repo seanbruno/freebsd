@@ -17,8 +17,11 @@ __FBSDID("$FreeBSD$");
 #include <stand.h>
 #include <string.h>
 #include <bootstrap.h>
+#ifdef BOOT_FORTH
+#include "ficl.h"
+#endif
 
-struct pnpinfo_stql	pnp_devices;
+static struct pnpinfo_stql pnp_devices;
 static int		pnp_devices_initted = 0;
 
 static void		pnp_discard(void);
@@ -68,15 +71,18 @@ pnp_scan(int argc, char *argv[])
     }
     if (verbose) {
 	pager_open();
-	pager_output("PNP scan summary:\n");
+	if (pager_output("PNP scan summary:\n"))
+		goto out;
 	STAILQ_FOREACH(pi, &pnp_devices, pi_link) {
 	    pager_output(STAILQ_FIRST(&pi->pi_ident)->id_ident);	/* first ident should be canonical */
 	    if (pi->pi_desc != NULL) {
 		pager_output(" : ");
 		pager_output(pi->pi_desc);
 	    }
-	    pager_output("\n");
+	    if (pager_output("\n"))
+		    break;
 	}
+out:
 	pager_close();
     }
     return(CMD_OK);
@@ -182,3 +188,49 @@ pnp_eisaformat(u_int8_t *data)
     return(idbuf);
 }
 
+#ifdef BOOT_FORTH
+void
+ficlPnpdevices(FICL_VM *pVM)
+{
+	static int pnp_devices_initted = 0;
+#if FICL_ROBUST > 1
+	vmCheckStack(pVM, 0, 1);
+#endif
+
+	if(!pnp_devices_initted) {
+		STAILQ_INIT(&pnp_devices);
+		pnp_devices_initted = 1;
+	}
+
+	stackPushPtr(pVM->pStack, &pnp_devices);
+
+	return;
+}
+
+void
+ficlPnphandlers(FICL_VM *pVM)
+{
+#if FICL_ROBUST > 1
+	vmCheckStack(pVM, 0, 1);
+#endif
+
+	stackPushPtr(pVM->pStack, pnphandlers);
+
+	return;
+}
+
+/*
+ * Glue function to add the appropriate forth words to access pnp BIOS
+ * functionality.
+ */
+static void ficlCompilePnp(FICL_SYSTEM *pSys)
+{
+    FICL_DICT *dp = pSys->dp;
+    assert (dp);
+
+    dictAppendWord(dp, "pnpdevices",ficlPnpdevices, FW_DEFAULT);
+    dictAppendWord(dp, "pnphandlers",ficlPnphandlers, FW_DEFAULT);
+}
+
+FICL_COMPILE_SET(ficlCompilePnp);
+#endif

@@ -739,7 +739,7 @@ update_arptab(u_char *ep, in_addr_t ipaddr)
 
 	/* Get the type and interface index */
 	rt = &rtmsg.rthdr;
-	bzero(rt, sizeof(rtmsg));
+	bzero(&rtmsg, sizeof(rtmsg));
 	rt->rtm_version = RTM_VERSION;
 	rt->rtm_addrs = RTA_DST;
 	rt->rtm_type = RTM_GET;
@@ -755,7 +755,8 @@ update_arptab(u_char *ep, in_addr_t ipaddr)
 	}
 	do {
 		cc = read(r, rt, sizeof(rtmsg));
-	} while (cc > 0 && (rt->rtm_seq != seq || rt->rtm_pid != pid));
+	} while (cc > 0 && (rt->rtm_type != RTM_GET || rt->rtm_seq != seq ||
+	    rt->rtm_pid != pid));
 	if (cc == -1) {
 		logmsg(LOG_ERR, "rtmsg get read: %m");
 		close(r);
@@ -803,7 +804,8 @@ update_arptab(u_char *ep, in_addr_t ipaddr)
 	}
 	do {
 		cc = read(r, rt, sizeof(rtmsg));
-	} while (cc > 0 && (rt->rtm_seq != seq || rt->rtm_pid != pid));
+	} while (cc > 0 && (rt->rtm_type != RTM_ADD || rt->rtm_seq != seq ||
+	    rt->rtm_pid != pid));
 	close(r);
 	if (cc == -1) {
 		logmsg(LOG_ERR, "rtmsg add read: %m");

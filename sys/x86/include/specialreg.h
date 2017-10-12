@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -227,6 +227,7 @@
 #define	AMDID2_DBE	0x04000000
 #define	AMDID2_PTSC	0x08000000
 #define	AMDID2_PTSCEL2I	0x10000000
+#define	AMDID2_MWAITX	0x20000000
 
 /*
  * CPUID instruction 1 eax info
@@ -307,6 +308,15 @@
 #define	CPUID_EXTSTATE_XSAVES	0x00000008
 
 /*
+ * AMD extended function 8000_0007h ebx info
+ */
+#define	AMDRAS_MCA_OF_RECOV	0x00000001
+#define	AMDRAS_SUCCOR		0x00000002
+#define	AMDRAS_HW_ASSERT	0x00000004
+#define	AMDRAS_SCALABLE_MCA	0x00000008
+#define	AMDRAS_PFEH_SUPPORT	0x00000010
+
+/*
  * AMD extended function 8000_0007h edx info
  */
 #define	AMDPM_TS		0x00000001
@@ -321,6 +331,13 @@
 #define	AMDPM_CPB		0x00000200
 
 /*
+ * AMD extended function 8000_0008h ebx info (amd_extended_feature_extensions)
+ */
+#define	AMDFEID_CLZERO		0x00000001
+#define	AMDFEID_IRPERF		0x00000002
+#define	AMDFEID_XSAVEERPTR	0x00000004
+
+/*
  * AMD extended function 8000_0008h ecx info
  */
 #define	AMDID_CMP_CORES		0x000000ff
@@ -332,6 +349,7 @@
  */
 #define	CPUID_STDEXT_FSGSBASE	0x00000001
 #define	CPUID_STDEXT_TSC_ADJUST	0x00000002
+#define	CPUID_STDEXT_SGX	0x00000004
 #define	CPUID_STDEXT_BMI1	0x00000008
 #define	CPUID_STDEXT_HLE	0x00000010
 #define	CPUID_STDEXT_AVX2	0x00000020
@@ -341,7 +359,10 @@
 #define	CPUID_STDEXT_ERMS	0x00000200
 #define	CPUID_STDEXT_INVPCID	0x00000400
 #define	CPUID_STDEXT_RTM	0x00000800
+#define	CPUID_STDEXT_PQM	0x00001000
+#define	CPUID_STDEXT_NFPUSG	0x00002000
 #define	CPUID_STDEXT_MPX	0x00004000
+#define	CPUID_STDEXT_PQE	0x00008000
 #define	CPUID_STDEXT_AVX512F	0x00010000
 #define	CPUID_STDEXT_AVX512DQ	0x00020000
 #define	CPUID_STDEXT_RDSEED	0x00040000
@@ -357,6 +378,16 @@
 #define	CPUID_STDEXT_AVX512CD	0x10000000
 #define	CPUID_STDEXT_SHA	0x20000000
 #define	CPUID_STDEXT_AVX512BW	0x40000000
+
+/*
+ * CPUID instruction 7 Structured Extended Features, leaf 0 ecx info
+ */
+#define	CPUID_STDEXT2_PREFETCHWT1 0x00000001
+#define	CPUID_STDEXT2_UMIP	0x00000004
+#define	CPUID_STDEXT2_PKU	0x00000008
+#define	CPUID_STDEXT2_OSPKE	0x00000010
+#define	CPUID_STDEXT2_RDPID	0x00400000
+#define	CPUID_STDEXT2_SGXLC	0x40000000
 
 /*
  * CPUID manufacturers identifiers
@@ -457,6 +488,7 @@
 #define	MSR_DRAM_ENERGY_STATUS	0x619
 #define	MSR_PP0_ENERGY_STATUS	0x639
 #define	MSR_PP1_ENERGY_STATUS	0x641
+#define	MSR_TSC_DEADLINE	0x6e0	/* Writes are not serializing */
 
 /*
  * VMX MSRs
@@ -478,7 +510,8 @@
 #define	MSR_VMX_TRUE_ENTRY_CTLS	0x490
 
 /*
- * X2APIC MSRs
+ * X2APIC MSRs.
+ * Writes are not serializing.
  */
 #define	MSR_APIC_000		0x800
 #define	MSR_APIC_ID		0x802
@@ -688,6 +721,23 @@
 #define	MC_MISC_ADDRESS_MODE	0x00000000000001c0	/* If MCG_CAP_SER_P */
 #define	MC_CTL2_THRESHOLD	0x0000000000007fff
 #define	MC_CTL2_CMCI_EN		0x0000000040000000
+#define	MC_AMDNB_BANK		4
+#define	MC_MISC_AMD_VAL		0x8000000000000000	/* Counter presence valid */
+#define	MC_MISC_AMD_CNTP	0x4000000000000000	/* Counter present */
+#define	MC_MISC_AMD_LOCK	0x2000000000000000	/* Register locked */
+#define	MC_MISC_AMD_INTP	0x1000000000000000	/* Int. type can generate interrupts */
+#define	MC_MISC_AMD_LVT_MASK	0x00f0000000000000	/* Extended LVT offset */
+#define	MC_MISC_AMD_LVT_SHIFT	52
+#define	MC_MISC_AMD_CNTEN	0x0008000000000000	/* Counter enabled */
+#define	MC_MISC_AMD_INT_MASK	0x0006000000000000	/* Interrupt type */
+#define	MC_MISC_AMD_INT_LVT	0x0002000000000000	/* Interrupt via Extended LVT */
+#define	MC_MISC_AMD_INT_SMI	0x0004000000000000	/* SMI */
+#define	MC_MISC_AMD_OVERFLOW	0x0001000000000000	/* Counter overflow */
+#define	MC_MISC_AMD_CNT_MASK	0x00000fff00000000	/* Counter value */
+#define	MC_MISC_AMD_CNT_SHIFT	32
+#define	MC_MISC_AMD_CNT_MAX	0xfff
+#define	MC_MISC_AMD_PTR_MASK	0x00000000ff000000	/* Pointer to additional registers */
+#define	MC_MISC_AMD_PTR_SHIFT	24
 
 /*
  * The following four 3-byte registers control the non-cacheable regions.
@@ -814,6 +864,7 @@
 #define	MSR_P_STATE_CONFIG(n) (0xc0010064 + (n)) /* P-state Config */
 #define	MSR_SMM_ADDR	0xc0010112	/* SMM TSEG base address */
 #define	MSR_SMM_MASK	0xc0010113	/* SMM TSEG address mask */
+#define	MSR_EXTFEATURES	0xc0011005	/* Extended CPUID Features override */
 #define	MSR_IC_CFG	0xc0011021	/* Instruction Cache Configuration */
 #define	MSR_K8_UCODE_UPDATE	0xc0010020	/* update microcode */
 #define	MSR_MC0_CTL_MASK	0xc0010044

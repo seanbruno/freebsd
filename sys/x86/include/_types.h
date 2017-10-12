@@ -43,6 +43,8 @@
 #error this file needs sys/cdefs.h as a prerequisite
 #endif
 
+#include <machine/_limits.h>
+
 #define __NO_STRICT_ALIGNMENT
 
 /*
@@ -140,8 +142,6 @@ typedef	__uint32_t	__vm_paddr_t;
 #endif
 typedef	__uint32_t	__vm_size_t;
 #endif
-typedef	__int64_t	__vm_ooffset_t;
-typedef	__uint64_t	__vm_pindex_t;
 typedef	int		___wchar_t;
 
 #define	__WCHAR_MIN	__INT_MIN	/* min value for a wchar_t */

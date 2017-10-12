@@ -32,14 +32,18 @@
  * SOFTWARE.
  */
 
+#define	LINUXKPI_PARAM_PREFIX ibcore_
+
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/sched.h>
 #include <linux/dma-attrs.h>
 #include <linux/slab.h>
 #include <linux/module.h>
+#include <linux/wait.h>
 #include <sys/priv.h>
 #include <sys/resourcevar.h>
+#include <sys/vmmeter.h>
 #include <vm/vm_pageout.h>
 #include <vm/vm_map.h>
 #include "uverbs.h"

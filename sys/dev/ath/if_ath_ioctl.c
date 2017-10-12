@@ -163,7 +163,7 @@ bad:
  * Diagnostic interface to the HAL.  This is used by various
  * tools to do things like retrieve register contents for
  * debugging.  The mechanism is intentionally opaque so that
- * it can change frequently w/o concern for compatiblity.
+ * it can change frequently w/o concern for compatibility.
  */
 static int
 ath_ioctl_diag(struct ath_softc *sc, struct ath_diag *ad)
@@ -296,6 +296,8 @@ ath_ioctl(struct ieee80211com *ic, u_long cmd, void *data)
 		return (ath_ioctl_spectral(sc, data));
 	case SIOCGATHNODERATESTATS:
 		return (ath_ioctl_ratestats(sc, data));
+	case SIOCGATHBTCOEX:
+		return (ath_btcoex_ioctl(sc, data));
 	default:
 		/*
 		 * This signals the net80211 layer that we didn't handle this

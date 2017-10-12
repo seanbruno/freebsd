@@ -33,6 +33,7 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/ptrace.h>
+#include <sys/rmlock.h>
 #include <sys/sysent.h>
 
 #define OP(x)	((x) >> 26)
@@ -42,32 +43,6 @@
 #define OP_RS(x) (((x) & 0x03E00000) >> 21)
 #define OP_RA(x) (((x) & 0x001F0000) >> 16)
 #define OP_RB(x) (((x) & 0x0000F100) >> 11)
-
-static int
-uread(proc_t *p, void *kaddr, size_t len, uintptr_t uaddr)
-{
-	ssize_t n;
-
-	PHOLD(p);
-	n = proc_readmem(curthread, p, uaddr, kaddr, len);
-	PRELE(p);
-	if (n <= 0 || n < len)
-		return (ENOMEM);
-	return (0);
-}
-
-static int
-uwrite(proc_t *p, void *kaddr, size_t len, uintptr_t uaddr)
-{
-	ssize_t n;
-
-	PHOLD(p);
-	n = proc_writemem(curthread, p, uaddr, kaddr, len);
-	PRELE(p);
-	if (n <= 0 || n < len)
-		return (ENOMEM);
-	return (0);
-}
 
 int
 fasttrap_tracepoint_install(proc_t *p, fasttrap_tracepoint_t *tp)
@@ -288,10 +263,12 @@ static void
 fasttrap_return_common(struct reg *rp, uintptr_t pc, pid_t pid,
     uintptr_t new_pc)
 {
+	struct rm_priotracker tracker;
 	fasttrap_tracepoint_t *tp;
 	fasttrap_bucket_t *bucket;
 	fasttrap_id_t *id;
 
+	rm_rlock(&fasttrap_tp_lock, &tracker);
 	bucket = &fasttrap_tpoints.fth_table[FASTTRAP_TPOINTS_INDEX(pid, pc)];
 
 	for (tp = bucket->ftb_data; tp != NULL; tp = tp->ftt_next) {
@@ -306,6 +283,7 @@ fasttrap_return_common(struct reg *rp, uintptr_t pc, pid_t pid,
 	 * is not essential to the correct execution of the process.
 	 */
 	if (tp == NULL) {
+		rm_runlock(&fasttrap_tp_lock, &tracker);
 		return;
 	}
 
@@ -323,6 +301,7 @@ fasttrap_return_common(struct reg *rp, uintptr_t pc, pid_t pid,
 		    pc - id->fti_probe->ftp_faddr,
 		    rp->fixreg[3], rp->fixreg[4], 0, 0);
 	}
+	rm_runlock(&fasttrap_tp_lock, &tracker);
 }
 
 
@@ -351,6 +330,7 @@ fasttrap_branch_taken(int bo, int bi, struct reg *regs)
 int
 fasttrap_pid_probe(struct reg *rp)
 {
+	struct rm_priotracker tracker;
 	proc_t *p = curproc;
 	uintptr_t pc = rp->pc;
 	uintptr_t new_pc = 0;
@@ -381,8 +361,7 @@ fasttrap_pid_probe(struct reg *rp)
 	curthread->t_dtrace_scrpc = 0;
 	curthread->t_dtrace_astpc = 0;
 
-
-	PROC_LOCK(p);
+	rm_rlock(&fasttrap_tp_lock, &tracker);
 	pid = p->p_pid;
 	bucket = &fasttrap_tpoints.fth_table[FASTTRAP_TPOINTS_INDEX(pid, pc)];
 
@@ -401,7 +380,7 @@ fasttrap_pid_probe(struct reg *rp)
 	 * fasttrap_ioctl), or somehow we have mislaid this tracepoint.
 	 */
 	if (tp == NULL) {
-		PROC_UNLOCK(p);
+		rm_runlock(&fasttrap_tp_lock, &tracker);
 		return (-1);
 	}
 
@@ -455,7 +434,7 @@ fasttrap_pid_probe(struct reg *rp)
 	 * tracepoint again later if we need to light up any return probes.
 	 */
 	tp_local = *tp;
-	PROC_UNLOCK(p);
+	rm_runlock(&fasttrap_tp_lock, &tracker);
 	tp = &tp_local;
 
 	/*

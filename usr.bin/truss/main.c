@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 
 #include <err.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sysdecode.h>
@@ -59,18 +60,6 @@ usage(void)
 	    "usage: truss [-cfaedDS] [-o file] [-s strsize] -p pid",
 	    "       truss [-cfaedDS] [-o file] [-s strsize] command [args]");
 	exit(1);
-}
-
-char *
-strsig(int sig)
-{
-	static char tmp[64];
-
-	if (sig > 0 && sig < NSIG) {
-		snprintf(tmp, sizeof(tmp), "SIG%s", sys_signame[sig]);
-		return (tmp);
-	}
-	return (NULL);
 }
 
 int
@@ -96,7 +85,7 @@ main(int ac, char **av)
 	trussinfo->curthread = NULL;
 	LIST_INIT(&trussinfo->proclist);
 	init_syscalls();
-	while ((c = getopt(ac, av, "p:o:facedDs:S")) != -1) {
+	while ((c = getopt(ac, av, "p:o:facedDs:SH")) != -1) {
 		switch (c) {
 		case 'p':	/* specified pid */
 			pid = atoi(optarg);
@@ -131,6 +120,9 @@ main(int ac, char **av)
 			break;
 		case 'S':	/* Don't trace signals */
 			trussinfo->flags |= NOSIGS;
+			break;
+		case 'H':
+			trussinfo->flags |= DISPLAYTIDS;
 			break;
 		default:
 			usage();

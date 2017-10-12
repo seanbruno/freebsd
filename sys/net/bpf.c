@@ -15,7 +15,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_bpf.h"
 #include "opt_compat.h"
+#include "opt_ddb.h"
 #include "opt_netgraph.h"
 
 #include <sys/types.h>
@@ -66,6 +67,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 
 #include <sys/socket.h>
+
+#ifdef DDB
+#include <ddb/ddb.h>
+#endif
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -101,6 +106,7 @@ struct bpf_if {
 	struct rwlock	bif_lock;	/* interface lock */
 	LIST_HEAD(, bpf_d) bif_wlist;	/* writer-only list */
 	int		bif_flags;	/* Interface flags */
+	struct bpf_if	**bif_bpf;	/* Pointer to pointer to us */
 };
 
 CTASSERT(offsetof(struct bpf_if, bif_ext) == 0);
@@ -116,7 +122,7 @@ CTASSERT(offsetof(struct bpf_if, bif_ext) == 0);
 #include <sys/mount.h>
 #include <compat/freebsd32/freebsd32.h>
 #define BPF_ALIGNMENT32 sizeof(int32_t)
-#define BPF_WORDALIGN32(x) (((x)+(BPF_ALIGNMENT32-1))&~(BPF_ALIGNMENT32-1))
+#define	BPF_WORDALIGN32(x) roundup2(x, BPF_ALIGNMENT32)
 
 #ifndef BURN_BRIDGES
 /*
@@ -1278,7 +1284,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 #endif
 		case BIOCGETIF:
 		case BIOCGRTIMEOUT:
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 		case BIOCGRTIMEOUT32:
 #endif
 		case BIOCGSTATS:
@@ -1290,7 +1296,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 		case FIONREAD:
 		case BIOCLOCK:
 		case BIOCSRTIMEOUT:
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 		case BIOCSRTIMEOUT32:
 #endif
 		case BIOCIMMEDIATE:
@@ -1514,7 +1520,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 	 * Set read timeout.
 	 */
 	case BIOCSRTIMEOUT:
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 	case BIOCSRTIMEOUT32:
 #endif
 		{
@@ -1545,12 +1551,12 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 	 * Get read timeout.
 	 */
 	case BIOCGRTIMEOUT:
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 	case BIOCGRTIMEOUT32:
 #endif
 		{
 			struct timeval *tv;
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 			struct timeval32 *tv32;
 			struct timeval tv64;
 
@@ -1562,7 +1568,7 @@ bpfioctl(struct cdev *dev, u_long cmd, caddr_t addr, int flags,
 
 			tv->tv_sec = d->bd_rtout / hz;
 			tv->tv_usec = (d->bd_rtout % hz) * tick;
-#if defined(COMPAT_FREEBSD32) && !defined(__mips__)
+#if defined(COMPAT_FREEBSD32) && defined(__amd64__)
 			if (cmd == BIOCGRTIMEOUT32) {
 				tv32 = (struct timeval32 *)addr;
 				tv32->tv_sec = tv->tv_sec;
@@ -2323,12 +2329,13 @@ bpf_hdrlen(struct bpf_d *d)
 static void
 bpf_bintime2ts(struct bintime *bt, struct bpf_ts *ts, int tstype)
 {
-	struct bintime bt2;
+	struct bintime bt2, boottimebin;
 	struct timeval tsm;
 	struct timespec tsn;
 
 	if ((tstype & BPF_T_MONOTONIC) == 0) {
 		bt2 = *bt;
+		getboottimebin(&boottimebin);
 		bintime_add(&bt2, &boottimebin);
 		bt = &bt2;
 	}
@@ -2557,6 +2564,7 @@ bpfattach2(struct ifnet *ifp, u_int dlt, u_int hdrlen, struct bpf_if **driverp)
 	bp->bif_dlt = dlt;
 	rw_init(&bp->bif_lock, "bpf interface lock");
 	KASSERT(*driverp == NULL, ("bpfattach2: driverp already initialized"));
+	bp->bif_bpf = driverp;
 	*driverp = bp;
 
 	BPF_LOCK();
@@ -2568,6 +2576,32 @@ bpfattach2(struct ifnet *ifp, u_int dlt, u_int hdrlen, struct bpf_if **driverp)
 	if (bootverbose && IS_DEFAULT_VNET(curvnet))
 		if_printf(ifp, "bpf attached\n");
 }
+
+#ifdef VIMAGE
+/*
+ * When moving interfaces between vnet instances we need a way to
+ * query the dlt and hdrlen before detach so we can re-attch the if_bpf
+ * after the vmove.  We unfortunately have no device driver infrastructure
+ * to query the interface for these values after creation/attach, thus
+ * add this as a workaround.
+ */
+int
+bpf_get_bp_params(struct bpf_if *bp, u_int *bif_dlt, u_int *bif_hdrlen)
+{
+
+	if (bp == NULL)
+		return (ENXIO);
+	if (bif_dlt == NULL && bif_hdrlen == NULL)
+		return (0);
+
+	if (bif_dlt != NULL)
+		*bif_dlt = bp->bif_dlt;
+	if (bif_hdrlen != NULL)
+		*bif_hdrlen = bp->bif_hdrlen;
+
+	return (0);
+}
+#endif
 
 /*
  * Detach bpf from an interface. This involves detaching each descriptor
@@ -2601,6 +2635,7 @@ bpfdetach(struct ifnet *ifp)
 		 */
 		BPFIF_WLOCK(bp);
 		bp->bif_flags |= BPFIF_FLAG_DYING;
+		*bp->bif_bpf = NULL;
 		BPFIF_WUNLOCK(bp);
 
 		CTR4(KTR_NET, "%s: sheduling free for encap %d (%p) for if %p",
@@ -2646,6 +2681,10 @@ bpf_ifdetach(void *arg __unused, struct ifnet *ifp)
 	struct bpf_if *bp, *bp_temp;
 	int nmatched = 0;
 
+	/* Ignore ifnet renaming. */
+	if (ifp->if_flags & IFF_RENAMING)
+		return;
+
 	BPF_LOCK();
 	/*
 	 * Find matching entries in free list.
@@ -2666,13 +2705,6 @@ bpf_ifdetach(void *arg __unused, struct ifnet *ifp)
 		nmatched++;
 	}
 	BPF_UNLOCK();
-
-	/*
-	 * Note that we cannot zero other pointers to
-	 * custom DLTs possibly used by given interface.
-	 */
-	if (nmatched != 0)
-		ifp->if_bpf = NULL;
 }
 
 /*
@@ -2681,26 +2713,44 @@ bpf_ifdetach(void *arg __unused, struct ifnet *ifp)
 static int
 bpf_getdltlist(struct bpf_d *d, struct bpf_dltlist *bfl)
 {
-	int n, error;
 	struct ifnet *ifp;
 	struct bpf_if *bp;
+	u_int *lst;
+	int error, n, n1;
 
 	BPF_LOCK_ASSERT();
 
 	ifp = d->bd_bif->bif_ifp;
+again:
+	n1 = 0;
+	LIST_FOREACH(bp, &bpf_iflist, bif_next) {
+		if (bp->bif_ifp == ifp)
+			n1++;
+	}
+	if (bfl->bfl_list == NULL) {
+		bfl->bfl_len = n1;
+		return (0);
+	}
+	if (n1 > bfl->bfl_len)
+		return (ENOMEM);
+	BPF_UNLOCK();
+	lst = malloc(n1 * sizeof(u_int), M_TEMP, M_WAITOK);
 	n = 0;
-	error = 0;
+	BPF_LOCK();
 	LIST_FOREACH(bp, &bpf_iflist, bif_next) {
 		if (bp->bif_ifp != ifp)
 			continue;
-		if (bfl->bfl_list != NULL) {
-			if (n >= bfl->bfl_len)
-				return (ENOMEM);
-			error = copyout(&bp->bif_dlt,
-			    bfl->bfl_list + n, sizeof(u_int));
+		if (n >= n1) {
+			free(lst, M_TEMP);
+			goto again;
 		}
+		lst[n] = bp->bif_dlt;
 		n++;
 	}
+	BPF_UNLOCK();
+	error = copyout(lst, bfl->bfl_list, sizeof(u_int) * n);
+	free(lst, M_TEMP);
+	BPF_LOCK();
 	bfl->bfl_len = n;
 	return (error);
 }
@@ -2959,3 +3009,34 @@ bpf_validate(const struct bpf_insn *f, int len)
 }
 
 #endif /* !DEV_BPF && !NETGRAPH_BPF */
+
+#ifdef DDB
+static void
+bpf_show_bpf_if(struct bpf_if *bpf_if)
+{
+
+	if (bpf_if == NULL)
+		return;
+	db_printf("%p:\n", bpf_if);
+#define	BPF_DB_PRINTF(f, e)	db_printf("   %s = " f "\n", #e, bpf_if->e);
+	/* bif_ext.bif_next */
+	/* bif_ext.bif_dlist */
+	BPF_DB_PRINTF("%#x", bif_dlt);
+	BPF_DB_PRINTF("%u", bif_hdrlen);
+	BPF_DB_PRINTF("%p", bif_ifp);
+	/* bif_lock */
+	/* bif_wlist */
+	BPF_DB_PRINTF("%#x", bif_flags);
+}
+
+DB_SHOW_COMMAND(bpf_if, db_show_bpf_if)
+{
+
+	if (!have_addr) {
+		db_printf("usage: show bpf_if <struct bpf_if *>\n");
+		return;
+	}
+
+	bpf_show_bpf_if((struct bpf_if *)addr);
+}
+#endif

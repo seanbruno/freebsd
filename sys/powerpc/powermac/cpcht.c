@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/rman.h>
 
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_pci.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -50,12 +51,13 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
-#include <dev/ofw/ofw_pci.h>
+#include <dev/ofw/ofwpci.h>
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
 
 #include "pcib_if.h"
+#include <dev/pci/pcib_private.h>
 #include "pic_if.h"
 
 /*
@@ -102,6 +104,7 @@ static device_method_t	cpcht_methods[] = {
 	DEVMETHOD(pcib_alloc_msix,	cpcht_alloc_msix),
 	DEVMETHOD(pcib_release_msix,	cpcht_release_msix),
 	DEVMETHOD(pcib_map_msi,		cpcht_map_msi),
+	DEVMETHOD(pcib_request_feature,	pcib_request_feature_allow),
 
 	DEVMETHOD_END
 };

@@ -33,28 +33,11 @@
 #include <sys/queue.h>
 #include <sys/linker_set.h>
 
-/*
- * Generic device specifier; architecture-dependant 
- * versions may be larger, but should be allowed to
- * overlap.
- */
-struct devdesc 
-{
-    struct devsw	*d_dev;
-    int			d_type;
-#define DEVT_NONE	0
-#define DEVT_DISK	1
-#define DEVT_NET	2
-#define	DEVT_CD		3
-#define DEVT_ZFS	4
-    int			d_unit;
-    void		*d_opendata;
-};
-
 /* Commands and return values; nonzero return sets command_errmsg != NULL */
 typedef int	(bootblk_cmd_t)(int argc, char *argv[]);
+#define	COMMAND_ERRBUFSZ	(256)
 extern char	*command_errmsg;	
-extern char	command_errbuf[];	/* XXX blah, length */
+extern char	command_errbuf[COMMAND_ERRBUFSZ];
 #define CMD_OK		0
 #define CMD_WARN	1
 #define CMD_ERROR	2
@@ -90,18 +73,22 @@ int	kern_pread(int fd, vm_offset_t dest, size_t len, off_t off);
 void	*alloc_pread(int fd, off_t off, size_t len);
 
 /* bcache.c */
-int	bcache_init(u_int nblks, size_t bsize);
-void	bcache_flush(void);
-int	bcache_strategy(void *devdata, int unit, int rw, daddr_t blk,
-			size_t size, char *buf, size_t *rsize);
+void	bcache_init(size_t nblks, size_t bsize);
+void	bcache_add_dev(int);
+void	*bcache_allocate(void);
+void	bcache_free(void *);
+int	bcache_strategy(void *devdata, int rw, daddr_t blk, size_t size,
+			char *buf, size_t *rsize);
 
 /*
  * Disk block cache
  */
 struct bcache_devdata
 {
-    int         (*dv_strategy)(void *devdata, int rw, daddr_t blk, size_t size, char *buf, size_t *rsize);
+    int         (*dv_strategy)(void *devdata, int rw, daddr_t blk,
+			size_t size, char *buf, size_t *rsize);
     void	*dv_devdata;
+    void	*dv_cache;
 };
 
 /*
@@ -116,6 +103,7 @@ struct console
 #define C_PRESENTOUT	(1<<1)	    /* console can provide output */
 #define C_ACTIVEIN	(1<<2)	    /* user wants input from console */
 #define C_ACTIVEOUT	(1<<3)	    /* user wants output to console */
+#define	C_WIDEOUT	(1<<4)	    /* c_out routine groks wide chars */
     void	(* c_probe)(struct console *cp);	/* set c_flags to match hardware */
     int		(* c_init)(int arg);			/* reinit XXX may need more args */
     void	(* c_out)(int c);			/* emit c */
@@ -153,8 +141,6 @@ struct pnpinfo
 };
 
 STAILQ_HEAD(pnpinfo_stql, pnpinfo);
-
-extern struct pnpinfo_stql pnp_devices;
 
 extern struct pnphandler	*pnphandlers[];		/* provided by MD code */
 
@@ -242,6 +228,7 @@ void file_discard(struct preloaded_file *fp);
 void file_addmetadata(struct preloaded_file *fp, int type, size_t size, void *p);
 int  file_addmodule(struct preloaded_file *fp, char *modname, int version,
 	struct kernel_module **newmp);
+void file_removemetadata(struct preloaded_file *fp);
 
 /* MI module loaders */
 #ifdef __elfN

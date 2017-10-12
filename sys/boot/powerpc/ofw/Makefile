@@ -63,14 +63,10 @@ LIBFDT=		${.OBJDIR}/../../fdt/libfdt.a
 .if ${MK_FORTH} != "no"
 # Enable BootForth
 BOOT_FORTH=	yes
-CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/powerpc
+CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl
+CFLAGS+=	-I${.CURDIR}/../../ficl/powerpc
 LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
 .endif
-
-# Avoid the open-close-dance for every file access as some firmwares perform
-# an auto-negotiation on every open of the network interface and thus causes
-# netbooting to take horribly long.
-CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE
 
 # Always add MI sources
 .PATH:		${.CURDIR}/../../common ${.CURDIR}/../../../libkern
@@ -78,7 +74,7 @@ CFLAGS+=	-DNETIF_OPEN_CLOSE_ONCE
 CFLAGS+=	-I${.CURDIR}/../../common -I${.CURDIR}/../../..
 CFLAGS+=	-I.
 
-CLEANFILES+=	vers.c loader.help
+CLEANFILES+=	loader.help
 
 CFLAGS+=	-ffreestanding -msoft-float
 # load address. set in linker script
@@ -95,15 +91,8 @@ LDFLAGS=	-nostdlib -static -T ${.CURDIR}/ldscript.powerpc
 LIBOFW=		${.OBJDIR}/../../ofw/libofw/libofw.a
 CFLAGS+=	-I${.CURDIR}/../../ofw/libofw
 
-# where to get libstand from
-LIBSTAND=	${.OBJDIR}/../../libstand32/libstand.a
-CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
-
-DPADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSTAND}
-LDADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSTAND}
-
-vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
-	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
+DPADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSA32}
+LDADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSA32}
 
 loader.help: help.common help.ofw ${.CURDIR}/../../fdt/help.fdt
 	cat ${.ALLSRC} | \

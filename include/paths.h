@@ -56,6 +56,7 @@
 #define	_PATH_DRUM	"/dev/drum"
 #define	_PATH_ESDB	"/usr/share/i18n/esdb"
 #define	_PATH_ETC	"/etc"
+#define	_PATH_FIRMWARE	"/usr/share/firmware"
 #define	_PATH_FTPUSERS	"/etc/ftpusers"
 #define	_PATH_FWMEM	"/dev/fwmem"
 #define	_PATH_GBDE	"/sbin/gbde"
@@ -98,6 +99,7 @@
 #define	_PATH_VARDB	"/var/db/"
 #define	_PATH_VARRUN	"/var/run/"
 #define	_PATH_VARTMP	"/var/tmp/"
+#define	_PATH_DEVVMM	"/dev/vmm/"
 #define	_PATH_YP	"/var/yp/"
 #define	_PATH_UUCPLOCK	"/var/spool/lock/"
 

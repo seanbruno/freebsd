@@ -122,7 +122,7 @@ struct atkbdc_quirks {
 };
 
 static struct atkbdc_quirks quirks[] = {
-    {"coreboot", "Acer", "Peppy",
+    {"coreboot", NULL, NULL,
 	KBDC_QUIRK_KEEP_ACTIVATED | KBDC_QUIRK_IGNORE_PROBE_RESULT |
 	KBDC_QUIRK_RESET_AFTER_PROBE | KBDC_QUIRK_SETLEDS_ON_INIT},
 
@@ -154,7 +154,7 @@ atkbdc_softc_t
 {
 	atkbdc_softc_t *sc;
 
-	if (unit >= sizeof(atkbdc_softc)/sizeof(atkbdc_softc[0]))
+	if (unit >= nitems(atkbdc_softc))
 		return NULL;
 	sc = atkbdc_softc[unit];
 	if (sc == NULL) {

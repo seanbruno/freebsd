@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -267,7 +267,7 @@ main(int argc, char *argv[])
 	}
 
 	if (blocksperfile)
-		blocksperfile = blocksperfile / ntrec * ntrec; /* round down */
+		blocksperfile = rounddown(blocksperfile, ntrec);
 	else if (!unlimited) {
 		/*
 		 * Determine how to default tape size and density
@@ -340,7 +340,7 @@ main(int argc, char *argv[])
 	spcl.c_dev[NAMELEN-1]='\0';
 	spcl.c_filesys[NAMELEN-1]='\0';
 
-	if ((mntpt = getmntpt(disk, &mntflags)) != 0) {
+	if ((mntpt = getmntpt(disk, &mntflags)) != NULL) {
 		if (mntflags & MNT_RDONLY) {
 			if (snapdump != 0) {
 				msg("WARNING: %s\n",

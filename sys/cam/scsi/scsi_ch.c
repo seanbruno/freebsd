@@ -586,7 +586,7 @@ chstart(struct cam_periph *periph, union ccb *start_ccb)
 				/* tag_action */ MSG_SIMPLE_Q_TAG,
 				/* dbd */ (softc->quirks & CH_Q_NO_DBD) ?
 					FALSE : TRUE,
-				/* page_code */ SMS_PAGE_CTRL_CURRENT,
+				/* pc */ SMS_PAGE_CTRL_CURRENT,
 				/* page */ CH_ELEMENT_ADDR_ASSIGN_PAGE,
 				/* param_buf */ (u_int8_t *)mode_buffer,
 				/* param_len */ mode_buffer_len,
@@ -648,6 +648,11 @@ chdone(struct cam_periph *periph, union ccb *done_ccb)
 		    		softc->sc_counts[CHET_IE],
 				PLURAL(softc->sc_counts[CHET_IE]));
 #undef PLURAL
+			if (announce_buf[0] != '\0') {
+				xpt_announce_periph(periph, announce_buf);
+				xpt_announce_quirks(periph, softc->quirks,
+				    CH_Q_BIT_STRING);
+			}
 		} else {
 			int error;
 
@@ -659,7 +664,7 @@ chdone(struct cam_periph *periph, union ccb *done_ccb)
 			 */
 			if (error == ERESTART) {
 				/*
-				 * A retry was scheuled, so
+				 * A retry was scheduled, so
 				 * just return.
 				 */
 				return;
@@ -714,13 +719,7 @@ chdone(struct cam_periph *periph, union ccb *done_ccb)
 
 				cam_periph_invalidate(periph);
 
-				announce_buf[0] = '\0';
 			}
-		}
-		if (announce_buf[0] != '\0') {
-			xpt_announce_periph(periph, announce_buf);
-			xpt_announce_quirks(periph, softc->quirks,
-			    CH_Q_BIT_STRING);
 		}
 		softc->state = CH_STATE_NORMAL;
 		free(mode_header, M_SCSICH);
@@ -1570,6 +1569,7 @@ chgetparams(struct cam_periph *periph)
 
 	if (mode_buffer == NULL) {
 		printf("chgetparams: couldn't malloc mode sense data\n");
+		xpt_release_ccb(ccb);
 		return(ENOSPC);
 	}
 
@@ -1588,7 +1588,7 @@ chgetparams(struct cam_periph *periph)
 			/* cbfcnp */ chdone,
 			/* tag_action */ MSG_SIMPLE_Q_TAG,
 			/* dbd */ dbd,
-			/* page_code */ SMS_PAGE_CTRL_CURRENT,
+			/* pc */ SMS_PAGE_CTRL_CURRENT,
 			/* page */ CH_ELEMENT_ADDR_ASSIGN_PAGE,
 			/* param_buf */ (u_int8_t *)mode_buffer,
 			/* param_len */ mode_buffer_len,
@@ -1651,7 +1651,7 @@ chgetparams(struct cam_periph *periph)
 			/* cbfcnp */ chdone,
 			/* tag_action */ MSG_SIMPLE_Q_TAG,
 			/* dbd */ dbd,
-			/* page_code */ SMS_PAGE_CTRL_CURRENT,
+			/* pc */ SMS_PAGE_CTRL_CURRENT,
 			/* page */ CH_DEVICE_CAP_PAGE,
 			/* param_buf */ (u_int8_t *)mode_buffer,
 			/* param_len */ mode_buffer_len,

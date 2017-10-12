@@ -183,6 +183,8 @@ static const struct rl_type re_devs[] = {
 	    "RealTek 810xE PCIe 10/100baseTX" },
 	{ RT_VENDORID, RT_DEVICEID_8168, 0,
 	    "RealTek 8168/8111 B/C/CP/D/DP/E/F/G PCIe Gigabit Ethernet" },
+	{ NCUBE_VENDORID, RT_DEVICEID_8168, 0,
+	    "TP-Link TG-3468 v2 (RTL8168) Gigabit Ethernet" },
 	{ RT_VENDORID, RT_DEVICEID_8169, 0,
 	    "RealTek 8169/8169S/8169SB(L)/8110S/8110SB(L) Gigabit Ethernet" },
 	{ RT_VENDORID, RT_DEVICEID_8169SC, 0,
@@ -953,7 +955,7 @@ re_probe(device_t dev)
 	}
 
 	t = re_devs;
-	for (i = 0; i < sizeof(re_devs) / sizeof(re_devs[0]); i++, t++) {
+	for (i = 0; i < nitems(re_devs); i++, t++) {
 		if (vendor == t->rl_vid && devid == t->rl_did) {
 			device_set_desc(dev, t->rl_name);
 			return (BUS_PROBE_DEFAULT);
@@ -1356,15 +1358,17 @@ re_attach(device_t dev)
 		CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
 	}
 
-	/* Disable ASPM L0S/L1. */
+	/* Disable ASPM L0S/L1 and CLKREQ. */
 	if (sc->rl_expcap != 0) {
 		cap = pci_read_config(dev, sc->rl_expcap +
 		    PCIER_LINK_CAP, 2);
 		if ((cap & PCIEM_LINK_CAP_ASPM) != 0) {
 			ctl = pci_read_config(dev, sc->rl_expcap +
 			    PCIER_LINK_CTL, 2);
-			if ((ctl & PCIEM_LINK_CTL_ASPMC) != 0) {
-				ctl &= ~PCIEM_LINK_CTL_ASPMC;
+			if ((ctl & (PCIEM_LINK_CTL_ECPM |
+			    PCIEM_LINK_CTL_ASPMC))!= 0) {
+				ctl &= ~(PCIEM_LINK_CTL_ECPM |
+				    PCIEM_LINK_CTL_ASPMC);
 				pci_write_config(dev, sc->rl_expcap +
 				    PCIER_LINK_CTL, ctl, 2);
 				device_printf(dev, "ASPM disabled\n");
@@ -2553,7 +2557,7 @@ re_intr(void *arg)
                 return (FILTER_STRAY);
 	CSR_WRITE_2(sc, RL_IMR, 0);
 
-	taskqueue_enqueue_fast(taskqueue_fast, &sc->rl_inttask);
+	taskqueue_enqueue(taskqueue_fast, &sc->rl_inttask);
 
 	return (FILTER_HANDLED);
 }
@@ -2621,7 +2625,7 @@ re_int_task(void *arg, int npending)
 	RL_UNLOCK(sc);
 
         if ((CSR_READ_2(sc, RL_ISR) & RL_INTRS_CPLUS) || rval) {
-		taskqueue_enqueue_fast(taskqueue_fast, &sc->rl_inttask);
+		taskqueue_enqueue(taskqueue_fast, &sc->rl_inttask);
 		return;
 	}
 

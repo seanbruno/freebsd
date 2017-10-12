@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2008-2015 Solarflare Communications Inc.
+ * Copyright (c) 2008-2016 Solarflare Communications Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -59,7 +59,7 @@ __FBSDID("$FreeBSD$");
 
 #if EFSYS_OPT_SIENA
 
-static efx_mcdi_ops_t	__efx_mcdi_siena_ops = {
+static const efx_mcdi_ops_t	__efx_mcdi_siena_ops = {
 	siena_mcdi_init,		/* emco_init */
 	siena_mcdi_send_request,	/* emco_send_request */
 	siena_mcdi_poll_reboot,		/* emco_poll_reboot */
@@ -67,13 +67,14 @@ static efx_mcdi_ops_t	__efx_mcdi_siena_ops = {
 	siena_mcdi_read_response,	/* emco_read_response */
 	siena_mcdi_fini,		/* emco_fini */
 	siena_mcdi_feature_supported,	/* emco_feature_supported */
+	siena_mcdi_get_timeout,		/* emco_get_timeout */
 };
 
 #endif	/* EFSYS_OPT_SIENA */
 
 #if EFSYS_OPT_HUNTINGTON || EFSYS_OPT_MEDFORD
 
-static efx_mcdi_ops_t	__efx_mcdi_ef10_ops = {
+static const efx_mcdi_ops_t	__efx_mcdi_ef10_ops = {
 	ef10_mcdi_init,			/* emco_init */
 	ef10_mcdi_send_request,		/* emco_send_request */
 	ef10_mcdi_poll_reboot,		/* emco_poll_reboot */
@@ -81,6 +82,7 @@ static efx_mcdi_ops_t	__efx_mcdi_ef10_ops = {
 	ef10_mcdi_read_response,	/* emco_read_response */
 	ef10_mcdi_fini,			/* emco_fini */
 	ef10_mcdi_feature_supported,	/* emco_feature_supported */
+	ef10_mcdi_get_timeout,		/* emco_get_timeout */
 };
 
 #endif	/* EFSYS_OPT_HUNTINGTON || EFSYS_OPT_MEDFORD */
@@ -92,35 +94,28 @@ efx_mcdi_init(
 	__in		efx_nic_t *enp,
 	__in		const efx_mcdi_transport_t *emtp)
 {
-	efx_mcdi_ops_t *emcop;
+	const efx_mcdi_ops_t *emcop;
 	efx_rc_t rc;
 
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
 	EFSYS_ASSERT3U(enp->en_mod_flags, ==, 0);
 
 	switch (enp->en_family) {
-#if EFSYS_OPT_FALCON
-	case EFX_FAMILY_FALCON:
-		emcop = NULL;
-		emtp = NULL;
-		break;
-#endif	/* EFSYS_OPT_FALCON */
-
 #if EFSYS_OPT_SIENA
 	case EFX_FAMILY_SIENA:
-		emcop = (efx_mcdi_ops_t *)&__efx_mcdi_siena_ops;
+		emcop = &__efx_mcdi_siena_ops;
 		break;
 #endif	/* EFSYS_OPT_SIENA */
 
 #if EFSYS_OPT_HUNTINGTON
 	case EFX_FAMILY_HUNTINGTON:
-		emcop = (efx_mcdi_ops_t *)&__efx_mcdi_ef10_ops;
+		emcop = &__efx_mcdi_ef10_ops;
 		break;
 #endif	/* EFSYS_OPT_HUNTINGTON */
 
 #if EFSYS_OPT_MEDFORD
 	case EFX_FAMILY_MEDFORD:
-		emcop = (efx_mcdi_ops_t *)&__efx_mcdi_ef10_ops;
+		emcop = &__efx_mcdi_ef10_ops;
 		break;
 #endif	/* EFSYS_OPT_MEDFORD */
 
@@ -168,7 +163,7 @@ efx_mcdi_fini(
 	__in		efx_nic_t *enp)
 {
 	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
 	EFSYS_ASSERT3U(enp->en_mod_flags, ==, EFX_MOD_MCDI);
@@ -188,7 +183,7 @@ efx_mcdi_new_epoch(
 	__in		efx_nic_t *enp)
 {
 	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
-	int state;
+	efsys_lock_state_t state;
 
 	/* Start a new epoch (allow fresh MCDI requests to succeed) */
 	EFSYS_LOCK(enp->en_eslp, state);
@@ -204,7 +199,7 @@ efx_mcdi_send_request(
 	__in		void *sdup,
 	__in		size_t sdu_len)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 
 	emcop->emco_send_request(enp, hdrp, hdr_len, sdup, sdu_len);
 }
@@ -213,7 +208,7 @@ static			efx_rc_t
 efx_mcdi_poll_reboot(
 	__in		efx_nic_t *enp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	efx_rc_t rc;
 
 	rc = emcop->emco_poll_reboot(enp);
@@ -224,7 +219,7 @@ static			boolean_t
 efx_mcdi_poll_response(
 	__in		efx_nic_t *enp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	boolean_t available;
 
 	available = emcop->emco_poll_response(enp);
@@ -238,7 +233,7 @@ efx_mcdi_read_response(
 	__in		size_t offset,
 	__in		size_t length)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 
 	emcop->emco_read_response(enp, bufferp, offset, length);
 }
@@ -259,7 +254,7 @@ efx_mcdi_request_start(
 	unsigned int seq;
 	unsigned int xflags;
 	boolean_t new_epoch;
-	int state;
+	efsys_lock_state_t state;
 
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
 	EFSYS_ASSERT3U(enp->en_mod_flags, &, EFX_MOD_MCDI);
@@ -507,7 +502,7 @@ efx_mcdi_request_poll(
 {
 	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
 	efx_mcdi_req_t *emrp;
-	int state;
+	efsys_lock_state_t state;
 	efx_rc_t rc;
 
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
@@ -526,6 +521,11 @@ efx_mcdi_request_poll(
 		if ((rc = efx_mcdi_poll_reboot(enp)) != 0) {
 			emip->emi_pending_req = NULL;
 			EFSYS_UNLOCK(enp->en_eslp, state);
+
+			/* Reboot/Assertion */
+			if (rc == EIO || rc == EINTR)
+				efx_mcdi_raise_exception(enp, emrp, rc);
+
 			goto fail1;
 		}
 	}
@@ -542,6 +542,9 @@ efx_mcdi_request_poll(
 	/* Request complete */
 	emip->emi_pending_req = NULL;
 
+	/* Ensure stale MCDI requests fail after an MC reboot. */
+	emip->emi_new_epoch = B_FALSE;
+
 	EFSYS_UNLOCK(enp->en_eslp, state);
 
 	if ((rc = emrp->emr_rc) != 0)
@@ -557,10 +560,6 @@ fail1:
 	if (!emrp->emr_quiet)
 		EFSYS_PROBE1(fail1, efx_rc_t, rc);
 
-	/* Reboot/Assertion */
-	if (rc == EIO || rc == EINTR)
-		efx_mcdi_raise_exception(enp, emrp, rc);
-
 	return (B_TRUE);
 }
 
@@ -571,7 +570,7 @@ efx_mcdi_request_abort(
 	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
 	efx_mcdi_req_t *emrp;
 	boolean_t aborted;
-	int state;
+	efsys_lock_state_t state;
 
 	EFSYS_ASSERT3U(enp->en_magic, ==, EFX_NIC_MAGIC);
 	EFSYS_ASSERT3U(enp->en_mod_flags, &, EFX_MOD_MCDI);
@@ -608,6 +607,17 @@ efx_mcdi_request_abort(
 	return (aborted);
 }
 
+			void
+efx_mcdi_get_timeout(
+	__in		efx_nic_t *enp,
+	__in		efx_mcdi_req_t *emrp,
+	__out		uint32_t *timeoutp)
+{
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+
+	emcop->emco_get_timeout(enp, emrp, timeoutp);
+}
+
 	__checkReturn	efx_rc_t
 efx_mcdi_request_errcode(
 	__in		unsigned int err)
@@ -639,6 +649,8 @@ efx_mcdi_request_errcode(
 		return (EALREADY);
 
 		/* MCDI v2 */
+	case MC_CMD_ERR_EEXIST:
+		return (EEXIST);
 #ifdef MC_CMD_ERR_EAGAIN
 	case MC_CMD_ERR_EAGAIN:
 		return (EAGAIN);
@@ -647,6 +659,8 @@ efx_mcdi_request_errcode(
 	case MC_CMD_ERR_ENOSPC:
 		return (ENOSPC);
 #endif
+	case MC_CMD_ERR_ERANGE:
+		return (ERANGE);
 
 	case MC_CMD_ERR_ALLOC_FAIL:
 		return (ENOMEM);
@@ -742,7 +756,7 @@ efx_mcdi_ev_cpl(
 	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
 	const efx_mcdi_transport_t *emtp = enp->en_mcdi.em_emtp;
 	efx_mcdi_req_t *emrp;
-	int state;
+	efsys_lock_state_t state;
 
 	EFSYS_ASSERT3U(enp->en_mod_flags, &, EFX_MOD_MCDI);
 	EFSYS_ASSERT3U(enp->en_features, &, EFX_FEATURE_MCDI);
@@ -796,7 +810,6 @@ efx_mcdi_get_proxy_handle(
 	__in		efx_mcdi_req_t *emrp,
 	__out		uint32_t *handlep)
 {
-	efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
 	efx_rc_t rc;
 
 	/*
@@ -854,7 +867,7 @@ efx_mcdi_ev_death(
 	const efx_mcdi_transport_t *emtp = enp->en_mcdi.em_emtp;
 	efx_mcdi_req_t *emrp = NULL;
 	boolean_t ev_cpl;
-	int state;
+	efsys_lock_state_t state;
 
 	/*
 	 * The MCDI request (if there is one) has been terminated, either
@@ -1094,7 +1107,7 @@ efx_mcdi_read_assertion(
 
 	/*
 	 * Before we attempt to chat to the MC, we should verify that the MC
-	 * isn't in it's assertion handler, either due to a previous reboot,
+	 * isn't in its assertion handler, either due to a previous reboot,
 	 * or because we're reinitializing due to an eec_exception().
 	 *
 	 * Use GET_ASSERTS to read any assertion state that may be present.
@@ -1184,11 +1197,9 @@ efx_mcdi_drv_attach(
 	__in		efx_nic_t *enp,
 	__in		boolean_t attach)
 {
-	efx_nic_cfg_t *encp = &(enp->en_nic_cfg);
 	efx_mcdi_req_t req;
 	uint8_t payload[MAX(MC_CMD_DRV_ATTACH_IN_LEN,
 			    MC_CMD_DRV_ATTACH_EXT_OUT_LEN)];
-	uint32_t flags;
 	efx_rc_t rc;
 
 	(void) memset(payload, 0, sizeof (payload));
@@ -1219,36 +1230,8 @@ efx_mcdi_drv_attach(
 		goto fail2;
 	}
 
-	if (attach == B_FALSE) {
-		flags = 0;
-	} else if (enp->en_family == EFX_FAMILY_SIENA) {
-		efx_mcdi_iface_t *emip = &(enp->en_mcdi.em_emip);
-
-		/* Create synthetic privileges for Siena functions */
-		flags = EFX_NIC_FUNC_LINKCTRL | EFX_NIC_FUNC_TRUSTED;
-		if (emip->emi_port == 1)
-			flags |= EFX_NIC_FUNC_PRIMARY;
-	} else {
-		EFX_STATIC_ASSERT(EFX_NIC_FUNC_PRIMARY ==
-		    (1u << MC_CMD_DRV_ATTACH_EXT_OUT_FLAG_PRIMARY));
-		EFX_STATIC_ASSERT(EFX_NIC_FUNC_LINKCTRL ==
-		    (1u << MC_CMD_DRV_ATTACH_EXT_OUT_FLAG_LINKCTRL));
-		EFX_STATIC_ASSERT(EFX_NIC_FUNC_TRUSTED ==
-		    (1u << MC_CMD_DRV_ATTACH_EXT_OUT_FLAG_TRUSTED));
-
-		/* Save function privilege flags (EF10 and later) */
-		if (req.emr_out_length_used < MC_CMD_DRV_ATTACH_EXT_OUT_LEN) {
-			rc = EMSGSIZE;
-			goto fail3;
-		}
-		flags = MCDI_OUT_DWORD(req, DRV_ATTACH_EXT_OUT_FUNC_FLAGS);
-	}
-	encp->enc_func_flags = flags;
-
 	return (0);
 
-fail3:
-	EFSYS_PROBE(fail3);
 fail2:
 	EFSYS_PROBE(fail2);
 fail1:
@@ -1435,10 +1418,6 @@ efx_mcdi_get_phy_cfg(
 			    (1 << EFX_PHY_LED_ON));
 #endif	/* EFSYS_OPT_PHY_LED_CONTROL */
 
-#if EFSYS_OPT_PHY_PROPS
-	encp->enc_phy_nprops  = 0;
-#endif	/* EFSYS_OPT_PHY_PROPS */
-
 	/* Get the media type of the fixed port, if recognised. */
 	EFX_STATIC_ASSERT(MC_CMD_MEDIA_XAUI == EFX_PHY_MEDIA_XAUI);
 	EFX_STATIC_ASSERT(MC_CMD_MEDIA_CX4 == EFX_PHY_MEDIA_CX4);
@@ -1497,7 +1476,7 @@ efx_mcdi_firmware_update_supported(
 	__in			efx_nic_t *enp,
 	__out			boolean_t *supportedp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	efx_rc_t rc;
 
 	if (emcop != NULL) {
@@ -1522,7 +1501,7 @@ efx_mcdi_macaddr_change_supported(
 	__in			efx_nic_t *enp,
 	__out			boolean_t *supportedp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	efx_rc_t rc;
 
 	if (emcop != NULL) {
@@ -1547,7 +1526,7 @@ efx_mcdi_link_control_supported(
 	__in			efx_nic_t *enp,
 	__out			boolean_t *supportedp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	efx_rc_t rc;
 
 	if (emcop != NULL) {
@@ -1572,7 +1551,7 @@ efx_mcdi_mac_spoofing_supported(
 	__in			efx_nic_t *enp,
 	__out			boolean_t *supportedp)
 {
-	efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
+	const efx_mcdi_ops_t *emcop = enp->en_mcdi.em_emcop;
 	efx_rc_t rc;
 
 	if (emcop != NULL) {
@@ -1734,8 +1713,7 @@ fail1:
 
 #if EFSYS_OPT_MAC_STATS
 
-typedef enum efx_stats_action_e
-{
+typedef enum efx_stats_action_e {
 	EFX_STATS_CLEAR,
 	EFX_STATS_UPLOAD,
 	EFX_STATS_ENABLE_NOEVENTS,
@@ -1747,7 +1725,8 @@ static	__checkReturn	efx_rc_t
 efx_mcdi_mac_stats(
 	__in		efx_nic_t *enp,
 	__in_opt	efsys_mem_t *esmp,
-	__in		efx_stats_action_t action)
+	__in		efx_stats_action_t action,
+	__in		uint16_t period_ms)
 {
 	efx_mcdi_req_t req;
 	uint8_t payload[MAX(MC_CMD_MAC_STATS_IN_LEN,
@@ -1772,7 +1751,7 @@ efx_mcdi_mac_stats(
 	    MAC_STATS_IN_PERIODIC_CHANGE, enable | events | disable,
 	    MAC_STATS_IN_PERIODIC_ENABLE, enable | events,
 	    MAC_STATS_IN_PERIODIC_NOEVENT, !events,
-	    MAC_STATS_IN_PERIOD_MS, (enable | events) ? 1000: 0);
+	    MAC_STATS_IN_PERIOD_MS, (enable | events) ? period_ms : 0);
 
 	if (esmp != NULL) {
 		int bytes = MC_CMD_MAC_NSTATS * sizeof (uint64_t);
@@ -1822,7 +1801,7 @@ efx_mcdi_mac_stats_clear(
 {
 	efx_rc_t rc;
 
-	if ((rc = efx_mcdi_mac_stats(enp, NULL, EFX_STATS_CLEAR)) != 0)
+	if ((rc = efx_mcdi_mac_stats(enp, NULL, EFX_STATS_CLEAR, 0)) != 0)
 		goto fail1;
 
 	return (0);
@@ -1845,7 +1824,7 @@ efx_mcdi_mac_stats_upload(
 	 * avoid having to pull the statistics buffer into the cache to
 	 * maintain cumulative statistics.
 	 */
-	if ((rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_UPLOAD)) != 0)
+	if ((rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_UPLOAD, 0)) != 0)
 		goto fail1;
 
 	return (0);
@@ -1860,7 +1839,7 @@ fail1:
 efx_mcdi_mac_stats_periodic(
 	__in		efx_nic_t *enp,
 	__in		efsys_mem_t *esmp,
-	__in		uint16_t period,
+	__in		uint16_t period_ms,
 	__in		boolean_t events)
 {
 	efx_rc_t rc;
@@ -1869,14 +1848,17 @@ efx_mcdi_mac_stats_periodic(
 	 * The MC DMAs aggregate statistics for our convenience, so we can
 	 * avoid having to pull the statistics buffer into the cache to
 	 * maintain cumulative statistics.
-	 * Huntington uses a fixed 1sec period, so use that on Siena too.
+	 * Huntington uses a fixed 1sec period.
+	 * Medford uses a fixed 1sec period before v6.2.1.1033 firmware.
 	 */
-	if (period == 0)
-		rc = efx_mcdi_mac_stats(enp, NULL, EFX_STATS_DISABLE);
+	if (period_ms == 0)
+		rc = efx_mcdi_mac_stats(enp, NULL, EFX_STATS_DISABLE, 0);
 	else if (events)
-		rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_ENABLE_EVENTS);
+		rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_ENABLE_EVENTS,
+		    period_ms);
 	else
-		rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_ENABLE_NOEVENTS);
+		rc = efx_mcdi_mac_stats(enp, esmp, EFX_STATS_ENABLE_NOEVENTS,
+		    period_ms);
 
 	if (rc != 0)
 		goto fail1;

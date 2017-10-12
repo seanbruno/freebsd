@@ -10,7 +10,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -112,6 +112,13 @@ SYSCTL_INT(_net_link, OID_AUTO, log_link_state_change, CTLFLAG_RW,
 	&log_link_state_change, 0,
 	"log interface link state change events");
 
+/* Log promiscuous mode change events */
+static int log_promisc_mode_change = 1;
+
+SYSCTL_INT(_net_link, OID_AUTO, log_promisc_mode_change, CTLFLAG_RDTUN,
+	&log_promisc_mode_change, 1,
+	"log promiscuous mode change events");
+
 /* Interface description */
 static unsigned int ifdescr_maxlen = 1024;
 SYSCTL_UINT(_net, OID_AUTO, ifdescr_maxlen, CTLFLAG_RW,
@@ -137,7 +144,7 @@ int	(*carp_output_p)(struct ifnet *ifp, struct mbuf *m,
     const struct sockaddr *sa);
 int	(*carp_ioctl_p)(struct ifreq *, u_long, struct thread *);   
 int	(*carp_attach_p)(struct ifaddr *, int);
-void	(*carp_detach_p)(struct ifaddr *);
+void	(*carp_detach_p)(struct ifaddr *, bool);
 #endif
 #ifdef INET
 int	(*carp_iamatch_p)(struct ifaddr *, uint8_t **);
@@ -175,6 +182,9 @@ static int	if_getgroupmembers(struct ifgroupreq *);
 static void	if_delgroups(struct ifnet *);
 static void	if_attach_internal(struct ifnet *, int, struct if_clone *);
 static int	if_detach_internal(struct ifnet *, int, struct if_clone **);
+#ifdef VIMAGE
+static void	if_vmove(struct ifnet *, struct vnet *);
+#endif
 
 #ifdef INET6
 /*
@@ -385,6 +395,20 @@ vnet_if_uninit(const void *unused __unused)
 }
 VNET_SYSUNINIT(vnet_if_uninit, SI_SUB_INIT_IF, SI_ORDER_FIRST,
     vnet_if_uninit, NULL);
+
+static void
+vnet_if_return(const void *unused __unused)
+{
+	struct ifnet *ifp, *nifp;
+
+	/* Return all inherited interfaces to their parent vnets. */
+	TAILQ_FOREACH_SAFE(ifp, &V_ifnet, if_link, nifp) {
+		if (ifp->if_home_vnet != ifp->if_vnet)
+			if_vmove(ifp, ifp->if_home_vnet);
+	}
+}
+VNET_SYSUNINIT(vnet_if_return, SI_SUB_VNET_DONE, SI_ORDER_ANY,
+    vnet_if_return, NULL);
 #endif
 
 static void
@@ -431,6 +455,9 @@ if_alloc(u_char type)
 	ifp->if_index = idx;
 	ifp->if_type = type;
 	ifp->if_alloctype = type;
+#ifdef VIMAGE
+	ifp->if_vnet = curvnet;
+#endif
 	if (if_com_alloc[type] != NULL) {
 		ifp->if_l2com = if_com_alloc[type](type, ifp);
 		if (ifp->if_l2com == NULL) {
@@ -558,7 +585,7 @@ ifq_delete(struct ifaltq *ifq)
 }
 
 /*
- * Perform generic interface initalization tasks and attach the interface
+ * Perform generic interface initialization tasks and attach the interface
  * to the list of "active" interfaces.  If vmove flag is set on entry
  * to if_attach_internal(), perform only a limited subset of initialization
  * tasks, given that we are moving from one vnet to another an ifnet which
@@ -717,6 +744,11 @@ if_attach_internal(struct ifnet *ifp, int vmove, struct if_clone *ifc)
 		/* Reliably crash if used uninitialized. */
 		ifp->if_broadcastaddr = NULL;
 
+		if (ifp->if_type == IFT_ETHER) {
+			ifp->if_hw_addr = malloc(ifp->if_addrlen, M_IFADDR,
+			    M_WAITOK | M_ZERO);
+		}
+
 #if defined(INET) || defined(INET6)
 		/* Use defaults for TSO, if nothing is set */
 		if (ifp->if_hw_tsomax == 0 &&
@@ -797,8 +829,7 @@ if_attachdomain1(struct ifnet *ifp)
 	 * Since dp->dom_ifattach calls malloc() with M_WAITOK, we
 	 * cannot lock ifp->if_afdata initialization, entirely.
 	 */
-	if (IF_AFDATA_TRYLOCK(ifp) == 0)
-		return;
+	IF_AFDATA_LOCK(ifp);
 	if (ifp->if_afdata_initialized >= domain_init_status) {
 		IF_AFDATA_UNLOCK(ifp);
 		log(LOG_WARNING, "%s called more than once on %s\n",
@@ -825,6 +856,7 @@ if_purgeaddrs(struct ifnet *ifp)
 {
 	struct ifaddr *ifa, *next;
 
+	/* XXX cannot hold IF_ADDR_WLOCK over called functions. */
 	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrhead, ifa_link, next) {
 		if (ifa->ifa_addr->sa_family == AF_LINK)
 			continue;
@@ -849,7 +881,9 @@ if_purgeaddrs(struct ifnet *ifp)
 			continue;
 		}
 #endif /* INET6 */
+		IF_ADDR_WLOCK(ifp);
 		TAILQ_REMOVE(&ifp->if_addrhead, ifa, ifa_link);
+		IF_ADDR_WUNLOCK(ifp);
 		ifa_free(ifa);
 	}
 }
@@ -888,6 +922,16 @@ if_detach(struct ifnet *ifp)
 	CURVNET_RESTORE();
 }
 
+/*
+ * The vmove flag, if set, indicates that we are called from a callpath
+ * that is moving an interface to a different vnet instance.
+ *
+ * The shutdown flag, if set, indicates that we are called in the
+ * process of shutting down a vnet instance.  Currently only the
+ * vnet_if_return SYSUNINIT function sets it.  Note: we can be called
+ * on a vnet instance shutdown without this flag being set, e.g., when
+ * the cloned interfaces are destoyed as first thing of teardown.
+ */
 static int
 if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 {
@@ -896,7 +940,12 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 	struct domain *dp;
  	struct ifnet *iter;
  	int found = 0;
+#ifdef VIMAGE
+	int shutdown;
 
+	shutdown = (ifp->if_vnet->vnet_state > SI_SUB_VNET &&
+		 ifp->if_vnet->vnet_state < SI_SUB_VNET_DONE) ? 1 : 0;
+#endif
 	IFNET_WLOCK();
 	TAILQ_FOREACH(iter, &V_ifnet, if_link)
 		if (iter == ifp) {
@@ -904,10 +953,6 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 			found = 1;
 			break;
 		}
-#ifdef VIMAGE
-	if (found)
-		curvnet->vnet_ifcnt--;
-#endif
 	IFNET_WUNLOCK();
 	if (!found) {
 		/*
@@ -925,19 +970,60 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 #endif
 	}
 
-	/* Check if this is a cloned interface or not. */
+	/*
+	 * At this point we know the interface still was on the ifnet list
+	 * and we removed it so we are in a stable state.
+	 */
+#ifdef VIMAGE
+	curvnet->vnet_ifcnt--;
+#endif
+
+	/*
+	 * In any case (destroy or vmove) detach us from the groups
+	 * and remove/wait for pending events on the taskq.
+	 * XXX-BZ in theory an interface could still enqueue a taskq change?
+	 */
+	if_delgroups(ifp);
+
+	taskqueue_drain(taskqueue_swi, &ifp->if_linktask);
+
+	/*
+	 * Check if this is a cloned interface or not. Must do even if
+	 * shutting down as a if_vmove_reclaim() would move the ifp and
+	 * the if_clone_addgroup() will have a corrupted string overwise
+	 * from a gibberish pointer.
+	 */
 	if (vmove && ifcp != NULL)
 		*ifcp = if_clone_findifc(ifp);
 
+	if_down(ifp);
+
+#ifdef VIMAGE
 	/*
-	 * Remove/wait for pending events.
+	 * On VNET shutdown abort here as the stack teardown will do all
+	 * the work top-down for us.
 	 */
-	taskqueue_drain(taskqueue_swi, &ifp->if_linktask);
+	if (shutdown) {
+		/*
+		 * In case of a vmove we are done here without error.
+		 * If we would signal an error it would lead to the same
+		 * abort as if we did not find the ifnet anymore.
+		 * if_detach() calls us in void context and does not care
+		 * about an early abort notification, so life is splendid :)
+		 */
+		goto finish_vnet_shutdown;
+	}
+#endif
+
+	/*
+	 * At this point we are not tearing down a VNET and are either
+	 * going to destroy or vmove the interface and have to cleanup
+	 * accordingly.
+	 */
 
 	/*
 	 * Remove routes and flush queues.
 	 */
-	if_down(ifp);
 #ifdef ALTQ
 	if (ALTQ_IS_ENABLED(&ifp->if_snd))
 		altq_disable(&ifp->if_snd);
@@ -978,19 +1064,26 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 		 * Remove link ifaddr pointer and maybe decrement if_index.
 		 * Clean up all addresses.
 		 */
+		free(ifp->if_hw_addr, M_IFADDR);
+		ifp->if_hw_addr = NULL;
 		ifp->if_addr = NULL;
 
 		/* We can now free link ifaddr. */
+		IF_ADDR_WLOCK(ifp);
 		if (!TAILQ_EMPTY(&ifp->if_addrhead)) {
 			ifa = TAILQ_FIRST(&ifp->if_addrhead);
 			TAILQ_REMOVE(&ifp->if_addrhead, ifa, ifa_link);
+			IF_ADDR_WUNLOCK(ifp);
 			ifa_free(ifa);
-		}
+		} else
+			IF_ADDR_WUNLOCK(ifp);
 	}
 
 	rt_flushifroutes(ifp);
-	if_delgroups(ifp);
 
+#ifdef VIMAGE
+finish_vnet_shutdown:
+#endif
 	/*
 	 * We cannot hold the lock over dom_ifdetach calls as they might
 	 * sleep, for example trying to drain a callout, thus open up the
@@ -1001,9 +1094,11 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
 	ifp->if_afdata_initialized = 0;
 	IF_AFDATA_UNLOCK(ifp);
 	for (dp = domains; i > 0 && dp; dp = dp->dom_next) {
-		if (dp->dom_ifdetach && ifp->if_afdata[dp->dom_family])
+		if (dp->dom_ifdetach && ifp->if_afdata[dp->dom_family]) {
 			(*dp->dom_ifdetach)(ifp,
 			    ifp->if_afdata[dp->dom_family]);
+			ifp->if_afdata[dp->dom_family] = NULL;
+		}
 	}
 
 	return (0);
@@ -1017,11 +1112,19 @@ if_detach_internal(struct ifnet *ifp, int vmove, struct if_clone **ifcp)
  * unused if_index in target vnet and calls if_grow() if necessary,
  * and finally find an unused if_xname for the target vnet.
  */
-void
+static void
 if_vmove(struct ifnet *ifp, struct vnet *new_vnet)
 {
 	struct if_clone *ifc;
+	u_int bif_dlt, bif_hdrlen;
 	int rc;
+
+ 	/*
+	 * if_detach_internal() will call the eventhandler to notify
+	 * interface departure.  That will detach if_bpf.  We need to
+	 * safe the dlt and hdrlen so we can re-attach it later.
+	 */
+	bpf_get_bp_params(ifp->if_bpf, &bif_dlt, &bif_hdrlen);
 
 	/*
 	 * Detach from current vnet, but preserve LLADDR info, do not
@@ -1062,6 +1165,9 @@ if_vmove(struct ifnet *ifp, struct vnet *new_vnet)
 
 	if_attach_internal(ifp, 1, ifc);
 
+	if (ifp->if_bpf == NULL)
+		bpfattach(ifp, bif_dlt, bif_hdrlen);
+
 	CURVNET_RESTORE();
 }
 
@@ -1073,6 +1179,7 @@ if_vmove_loan(struct thread *td, struct ifnet *ifp, char *ifname, int jid)
 {
 	struct prison *pr;
 	struct ifnet *difp;
+	int shutdown;
 
 	/* Try to find the prison within our visibility. */
 	sx_slock(&allprison_lock);
@@ -1093,11 +1200,21 @@ if_vmove_loan(struct thread *td, struct ifnet *ifp, char *ifname, int jid)
 	/* XXX Lock interfaces to avoid races. */
 	CURVNET_SET_QUIET(pr->pr_vnet);
 	difp = ifunit(ifname);
-	CURVNET_RESTORE();
 	if (difp != NULL) {
+		CURVNET_RESTORE();
 		prison_free(pr);
 		return (EEXIST);
 	}
+
+	/* Make sure the VNET is stable. */
+	shutdown = (ifp->if_vnet->vnet_state > SI_SUB_VNET &&
+		 ifp->if_vnet->vnet_state < SI_SUB_VNET_DONE) ? 1 : 0;
+	if (shutdown) {
+		CURVNET_RESTORE();
+		prison_free(pr);
+		return (EBUSY);
+	}
+	CURVNET_RESTORE();
 
 	/* Move the interface into the child jail/vnet. */
 	if_vmove(ifp, pr->pr_vnet);
@@ -1115,6 +1232,7 @@ if_vmove_reclaim(struct thread *td, char *ifname, int jid)
 	struct prison *pr;
 	struct vnet *vnet_dst;
 	struct ifnet *ifp;
+ 	int shutdown;
 
 	/* Try to find the prison within our visibility. */
 	sx_slock(&allprison_lock);
@@ -1140,6 +1258,15 @@ if_vmove_reclaim(struct thread *td, char *ifname, int jid)
 		CURVNET_RESTORE();
 		prison_free(pr);
 		return (EEXIST);
+	}
+
+	/* Make sure the VNET is stable. */
+	shutdown = (ifp->if_vnet->vnet_state > SI_SUB_VNET &&
+		 ifp->if_vnet->vnet_state < SI_SUB_VNET_DONE) ? 1 : 0;
+	if (shutdown) {
+		CURVNET_RESTORE();
+		prison_free(pr);
+		return (EBUSY);
 	}
 
 	/* Get interface back from child jail/vnet. */
@@ -1937,8 +2064,8 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 	struct sockaddr *dst;
 	struct ifnet *ifp;
 
-	if (cmd != RTM_ADD || ((ifa = rt->rt_ifa) == 0) ||
-	    ((ifp = ifa->ifa_ifp) == 0) || ((dst = rt_key(rt)) == 0))
+	if (cmd != RTM_ADD || ((ifa = rt->rt_ifa) == NULL) ||
+	    ((ifp = ifa->ifa_ifp) == NULL) || ((dst = rt_key(rt)) == NULL))
 		return;
 	ifa = ifaof_ifpforaddr(dst, ifp);
 	if (ifa) {
@@ -2086,7 +2213,7 @@ do_link_state_change(void *arg, int pending)
 	if (log_link_state_change)
 		log(LOG_NOTICE, "%s: link state changed to %s\n", ifp->if_xname,
 		    (link_state == LINK_STATE_UP) ? "UP" : "DOWN" );
-	EVENTHANDLER_INVOKE(ifnet_link_event, ifp, ifp->if_link_state);
+	EVENTHANDLER_INVOKE(ifnet_link_event, ifp, link_state);
 	CURVNET_RESTORE();
 }
 
@@ -2098,6 +2225,7 @@ void
 if_down(struct ifnet *ifp)
 {
 
+	EVENTHANDLER_INVOKE(ifnet_event, ifp, IFNET_EVENT_DOWN);
 	if_unroute(ifp, IFF_UP, AF_UNSPEC);
 }
 
@@ -2110,6 +2238,7 @@ if_up(struct ifnet *ifp)
 {
 
 	if_route(ifp, IFF_UP, AF_UNSPEC);
+	EVENTHANDLER_INVOKE(ifnet_event, ifp, IFNET_EVENT_UP);
 }
 
 /*
@@ -2128,7 +2257,7 @@ if_qflush(struct ifnet *ifp)
 		ALTQ_PURGE(ifq);
 #endif
 	n = ifq->ifq_head;
-	while ((m = n) != 0) {
+	while ((m = n) != NULL) {
 		n = m->m_nextpkt;
 		m_freem(m);
 	}
@@ -2180,7 +2309,7 @@ static int
 ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 {
 	struct ifreq *ifr;
-	int error = 0;
+	int error = 0, do_ifup = 0;
 	int new_flags, temp_flags;
 	size_t namelen, onamelen;
 	size_t descrlen;
@@ -2307,7 +2436,7 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 			if_down(ifp);
 		} else if (new_flags & IFF_UP &&
 		    (ifp->if_flags & IFF_UP) == 0) {
-			if_up(ifp);
+			do_ifup = 1;
 		}
 		/* See if permanently promiscuous mode bit is about to flip */
 		if ((ifp->if_flags ^ new_flags) & IFF_PPROMISC) {
@@ -2315,15 +2444,19 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 				ifp->if_flags |= IFF_PROMISC;
 			else if (ifp->if_pcount == 0)
 				ifp->if_flags &= ~IFF_PROMISC;
-			log(LOG_INFO, "%s: permanently promiscuous mode %s\n",
-			    ifp->if_xname,
-			    (new_flags & IFF_PPROMISC) ? "enabled" : "disabled");
+			if (log_promisc_mode_change)
+                                log(LOG_INFO, "%s: permanently promiscuous mode %s\n",
+                                    ifp->if_xname,
+                                    ((new_flags & IFF_PPROMISC) ?
+                                     "enabled" : "disabled"));
 		}
 		ifp->if_flags = (ifp->if_flags & IFF_CANTCHANGE) |
 			(new_flags &~ IFF_CANTCHANGE);
 		if (ifp->if_ioctl) {
 			(void) (*ifp->if_ioctl)(ifp, cmd, data);
 		}
+		if (do_ifup)
+			if_up(ifp);
 		getmicrotime(&ifp->if_lastchange);
 		break;
 
@@ -2355,6 +2488,11 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 			return (error);
 		if (new_name[0] == '\0')
 			return (EINVAL);
+		if (new_name[IFNAMSIZ-1] != '\0') {
+			new_name[IFNAMSIZ-1] = '\0';
+			if (strlen(new_name) == IFNAMSIZ-1)
+				return (EINVAL);
+		}
 		if (ifunit(new_name) != NULL)
 			return (EEXIST);
 
@@ -2523,6 +2661,8 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 	case SIOCGIFMEDIA:
 	case SIOCGIFXMEDIA:
 	case SIOCGIFGENERIC:
+	case SIOCGIFRSSKEY:
+	case SIOCGIFRSSHASH:
 		if (ifp->if_ioctl == NULL)
 			return (EOPNOTSUPP);
 		error = (*ifp->if_ioctl)(ifp, cmd, data);
@@ -2534,6 +2674,10 @@ ifhwioctl(u_long cmd, struct ifnet *ifp, caddr_t data, struct thread *td)
 			return (error);
 		error = if_setlladdr(ifp,
 		    ifr->ifr_addr.sa_data, ifr->ifr_addr.sa_len);
+		break;
+
+	case SIOCGHWADDR:
+		error = if_gethwaddr(ifp, ifr);
 		break;
 
 	case SIOCAIFGROUP:
@@ -2593,8 +2737,22 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct thread *td)
 	struct ifreq *ifr;
 	int error;
 	int oif_flags;
+#ifdef VIMAGE
+	int shutdown;
+#endif
 
 	CURVNET_SET(so->so_vnet);
+#ifdef VIMAGE
+	/* Make sure the VNET is stable. */
+	shutdown = (so->so_vnet->vnet_state > SI_SUB_VNET &&
+		 so->so_vnet->vnet_state < SI_SUB_VNET_DONE) ? 1 : 0;
+	if (shutdown) {
+		CURVNET_RESTORE();
+		return (EBUSY);
+	}
+#endif
+
+
 	switch (cmd) {
 	case SIOCGIFCONF:
 		error = ifconf(cmd, data);
@@ -2802,7 +2960,8 @@ ifpromisc(struct ifnet *ifp, int pswitch)
 	error = if_setflag(ifp, IFF_PROMISC, IFF_PPROMISC,
 			   &ifp->if_pcount, pswitch);
 	/* If promiscuous mode status has changed, log a message */
-	if (error == 0 && ((ifp->if_flags ^ oldflags) & IFF_PROMISC))
+	if (error == 0 && ((ifp->if_flags ^ oldflags) & IFF_PROMISC) &&
+            log_promisc_mode_change)
 		log(LOG_INFO, "%s: promiscuous mode %s\n",
 		    ifp->if_xname,
 		    (ifp->if_flags & IFF_PROMISC) ? "enabled" : "disabled");
@@ -3371,7 +3530,6 @@ if_setlladdr(struct ifnet *ifp, const u_char *lladdr, int len)
 	case IFT_BRIDGE:
 	case IFT_ARCNET:
 	case IFT_IEEE8023ADLAG:
-	case IFT_IEEE80211:
 		bcopy(lladdr, LLADDR(sdl), len);
 		ifa_free(ifa);
 		break;
@@ -3436,6 +3594,29 @@ if_requestencap_default(struct ifnet *ifp, struct if_encap_req *req)
 	req->lladdr_off = 0;
 
 	return (0);
+}
+
+/*
+ * Get the link layer address that was read from the hardware at attach.
+ *
+ * This is only set by Ethernet NICs (IFT_ETHER), but laggX interfaces re-type
+ * their component interfaces as IFT_IEEE8023ADLAG.
+ */
+int
+if_gethwaddr(struct ifnet *ifp, struct ifreq *ifr)
+{
+
+	if (ifp->if_hw_addr == NULL)
+		return (ENODEV);
+
+	switch (ifp->if_type) {
+	case IFT_ETHER:
+	case IFT_IEEE8023ADLAG:
+		bcopy(ifp->if_hw_addr, ifr->ifr_addr.sa_data, ifp->if_addrlen);
+		return (0);
+	default:
+		return (ENODEV);
+	}
 }
 
 /*
@@ -3874,6 +4055,19 @@ if_multiaddr_count(if_t ifp, int max)
 	return (count);
 }
 
+int
+if_multi_apply(struct ifnet *ifp, int (*filter)(void *, struct ifmultiaddr *, int), void *arg)
+{
+	struct ifmultiaddr *ifma;
+	int cnt = 0;
+
+	if_maddr_rlock(ifp);
+	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link)
+		cnt += filter(arg, ifma, cnt);
+	if_maddr_runlock(ifp);
+	return (cnt);
+}
+
 struct mbuf *
 if_dequeue(if_t ifp)
 {
@@ -3930,6 +4124,51 @@ if_vlancap(if_t ifh)
 {
 	struct ifnet *ifp = (struct ifnet *)ifh;
 	VLAN_CAPABILITIES(ifp);
+}
+
+int
+if_sethwtsomax(if_t ifp, u_int if_hw_tsomax)
+{
+
+	((struct ifnet *)ifp)->if_hw_tsomax = if_hw_tsomax;
+        return (0);
+}
+
+int
+if_sethwtsomaxsegcount(if_t ifp, u_int if_hw_tsomaxsegcount)
+{
+
+	((struct ifnet *)ifp)->if_hw_tsomaxsegcount = if_hw_tsomaxsegcount;
+        return (0);
+}
+
+int
+if_sethwtsomaxsegsize(if_t ifp, u_int if_hw_tsomaxsegsize)
+{
+
+	((struct ifnet *)ifp)->if_hw_tsomaxsegsize = if_hw_tsomaxsegsize;
+        return (0);
+}
+
+u_int
+if_gethwtsomax(if_t ifp)
+{
+
+	return (((struct ifnet *)ifp)->if_hw_tsomax);
+}
+
+u_int
+if_gethwtsomaxsegcount(if_t ifp)
+{
+
+	return (((struct ifnet *)ifp)->if_hw_tsomaxsegcount);
+}
+
+u_int
+if_gethwtsomaxsegsize(if_t ifp)
+{
+
+	return (((struct ifnet *)ifp)->if_hw_tsomaxsegsize);
 }
 
 void

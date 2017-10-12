@@ -17,7 +17,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -79,6 +79,7 @@ SYSCTL_INT(_vfs, OID_AUTO, usermount, CTLFLAG_RW, &usermount, 0,
     "Unprivileged users may mount and unmount file systems");
 
 MALLOC_DEFINE(M_MOUNT, "mount", "vfs mount structure");
+MALLOC_DEFINE(M_STATFS, "statfs", "statfs structure");
 static uma_zone_t mount_zone;
 
 /* List of mounted filesystems. */
@@ -109,6 +110,7 @@ mount_init(void *mem, int size, int flags)
 
 	mp = (struct mount *)mem;
 	mtx_init(&mp->mnt_mtx, "struct mount mtx", NULL, MTX_DEF);
+	mtx_init(&mp->mnt_listmtx, "struct mount vlist mtx", NULL, MTX_DEF);
 	lockinit(&mp->mnt_explock, PVFS, "explock", 0, 0);
 	return (0);
 }
@@ -120,6 +122,7 @@ mount_fini(void *mem, int size)
 
 	mp = (struct mount *)mem;
 	lockdestroy(&mp->mnt_explock);
+	mtx_destroy(&mp->mnt_listmtx);
 	mtx_destroy(&mp->mnt_mtx);
 }
 
@@ -363,14 +366,15 @@ vfs_mergeopts(struct vfsoptlist *toopts, struct vfsoptlist *oldopts)
 /*
  * Mount a filesystem.
  */
+#ifndef _SYS_SYSPROTO_H_
+struct nmount_args {
+	struct iovec *iovp;
+	unsigned int iovcnt;
+	int flags;
+};
+#endif
 int
-sys_nmount(td, uap)
-	struct thread *td;
-	struct nmount_args /* {
-		struct iovec *iovp;
-		unsigned int iovcnt;
-		int flags;
-	} */ *uap;
+sys_nmount(struct thread *td, struct nmount_args *uap)
 {
 	struct uio *auio;
 	int error;
@@ -461,6 +465,8 @@ vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
 	mp->mnt_nvnodelistsize = 0;
 	TAILQ_INIT(&mp->mnt_activevnodelist);
 	mp->mnt_activevnodelistsize = 0;
+	TAILQ_INIT(&mp->mnt_tmpfreevnodelist);
+	mp->mnt_tmpfreevnodelistsize = 0;
 	mp->mnt_ref = 0;
 	(void) vfs_busy(mp, MBF_NOWAIT);
 	atomic_add_acq_int(&vfsp->vfc_refcount, 1);
@@ -510,7 +516,7 @@ vfs_mount_destroy(struct mount *mp)
 		struct vnode *vp;
 
 		TAILQ_FOREACH(vp, &mp->mnt_nvnodelist, v_nmntvnodes)
-			vprint("", vp);
+			vn_printf(vp, "dangling vnode ");
 		panic("unmount: dangling vnode");
 	}
 	KASSERT(TAILQ_EMPTY(&mp->mnt_uppers), ("mnt_uppers"));
@@ -518,9 +524,13 @@ vfs_mount_destroy(struct mount *mp)
 		panic("vfs_mount_destroy: nonzero nvnodelistsize");
 	if (mp->mnt_activevnodelistsize != 0)
 		panic("vfs_mount_destroy: nonzero activevnodelistsize");
+	if (mp->mnt_tmpfreevnodelistsize != 0)
+		panic("vfs_mount_destroy: nonzero tmpfreevnodelistsize");
 	if (mp->mnt_lockref != 0)
 		panic("vfs_mount_destroy: nonzero lock refcount");
 	MNT_IUNLOCK(mp);
+	if (mp->mnt_vnodecovered != NULL)
+		vrele(mp->mnt_vnodecovered);
 #ifdef MAC
 	mac_mount_destroy(mp);
 #endif
@@ -699,14 +709,7 @@ struct mount_args {
 #endif
 /* ARGSUSED */
 int
-sys_mount(td, uap)
-	struct thread *td;
-	struct mount_args /* {
-		char *type;
-		char *path;
-		int flags;
-		caddr_t data;
-	} */ *uap;
+sys_mount(struct thread *td, struct mount_args *uap)
 {
 	char *fstype;
 	struct vfsconf *vfsp = NULL;
@@ -818,6 +821,7 @@ vfs_domount_first(
 	error = VFS_MOUNT(mp);
 	if (error != 0) {
 		vfs_unbusy(mp);
+		mp->mnt_vnodecovered = NULL;
 		vfs_mount_destroy(mp);
 		VI_LOCK(vp);
 		vp->v_iflag &= ~VI_MOUNT;
@@ -934,6 +938,11 @@ vfs_domount_update(
 	VOP_UNLOCK(vp, 0);
 
 	MNT_ILOCK(mp);
+	if ((mp->mnt_kern_flag & MNTK_UNMOUNT) != 0) {
+		MNT_IUNLOCK(mp);
+		error = EBUSY;
+		goto end;
+	}
 	mp->mnt_flag &= ~MNT_UPDATEMASK;
 	mp->mnt_flag |= fsflags & (MNT_RELOAD | MNT_FORCE | MNT_UPDATE |
 	    MNT_SNAPSHOT | MNT_ROOTFS | MNT_UPDATEMASK | MNT_RDONLY);
@@ -1205,6 +1214,49 @@ sys_unmount(struct thread *td, struct unmount_args *uap)
 }
 
 /*
+ * Return error if any of the vnodes, ignoring the root vnode
+ * and the syncer vnode, have non-zero usecount.
+ *
+ * This function is purely advisory - it can return false positives
+ * and negatives.
+ */
+static int
+vfs_check_usecounts(struct mount *mp)
+{
+	struct vnode *vp, *mvp;
+
+	MNT_VNODE_FOREACH_ALL(vp, mp, mvp) {
+		if ((vp->v_vflag & VV_ROOT) == 0 && vp->v_type != VNON &&
+		    vp->v_usecount != 0) {
+			VI_UNLOCK(vp);
+			MNT_VNODE_FOREACH_ALL_ABORT(mp, mvp);
+			return (EBUSY);
+		}
+		VI_UNLOCK(vp);
+	}
+
+	return (0);
+}
+
+static void
+dounmount_cleanup(struct mount *mp, struct vnode *coveredvp, int mntkflags)
+{
+
+	mtx_assert(MNT_MTX(mp), MA_OWNED);
+	mp->mnt_kern_flag &= ~mntkflags;
+	if ((mp->mnt_kern_flag & MNTK_MWAIT) != 0) {
+		mp->mnt_kern_flag &= ~MNTK_MWAIT;
+		wakeup(mp);
+	}
+	MNT_IUNLOCK(mp);
+	if (coveredvp != NULL) {
+		VOP_UNLOCK(coveredvp, 0);
+		vdrop(coveredvp);
+	}
+	vn_finished_write(mp);
+}
+
+/*
  * Do the actual filesystem unmount.
  */
 int
@@ -1220,7 +1272,6 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		VI_LOCK(coveredvp);
 		vholdl(coveredvp);
 		vn_lock(coveredvp, LK_EXCLUSIVE | LK_INTERLOCK | LK_RETRY);
-		vdrop(coveredvp);
 		/*
 		 * Check for mp being unmounted while waiting for the
 		 * covered vnode lock.
@@ -1228,18 +1279,22 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		if (coveredvp->v_mountedhere != mp ||
 		    coveredvp->v_mountedhere->mnt_gen != mnt_gen_r) {
 			VOP_UNLOCK(coveredvp, 0);
+			vdrop(coveredvp);
 			vfs_rel(mp);
 			return (EBUSY);
 		}
 	}
+
 	/*
 	 * Only privileged root, or (if MNT_USER is set) the user that did the
 	 * original mount is permitted to unmount this filesystem.
 	 */
 	error = vfs_suser(mp, td);
 	if (error != 0) {
-		if (coveredvp)
+		if (coveredvp != NULL) {
 			VOP_UNLOCK(coveredvp, 0);
+			vdrop(coveredvp);
+		}
 		vfs_rel(mp);
 		return (error);
 	}
@@ -1247,14 +1302,22 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	vn_start_write(NULL, &mp, V_WAIT | V_MNTREF);
 	MNT_ILOCK(mp);
 	if ((mp->mnt_kern_flag & MNTK_UNMOUNT) != 0 ||
+	    (mp->mnt_flag & MNT_UPDATE) != 0 ||
 	    !TAILQ_EMPTY(&mp->mnt_uppers)) {
-		MNT_IUNLOCK(mp);
-		if (coveredvp)
-			VOP_UNLOCK(coveredvp, 0);
-		vn_finished_write(mp);
+		dounmount_cleanup(mp, coveredvp, 0);
 		return (EBUSY);
 	}
 	mp->mnt_kern_flag |= MNTK_UNMOUNT | MNTK_NOINSMNTQ;
+	if (flags & MNT_NONBUSY) {
+		MNT_IUNLOCK(mp);
+		error = vfs_check_usecounts(mp);
+		MNT_ILOCK(mp);
+		if (error != 0) {
+			dounmount_cleanup(mp, coveredvp, MNTK_UNMOUNT |
+			    MNTK_NOINSMNTQ);
+			return (error);
+		}
+	}
 	/* Allow filesystems to detect that a forced unmount is in progress. */
 	if (flags & MNT_FORCE) {
 		mp->mnt_kern_flag |= MNTK_UNMOUNTF;
@@ -1283,13 +1346,23 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	if (mp->mnt_flag & MNT_EXPUBLIC)
 		vfs_setpublicfs(NULL, NULL, NULL);
 
+	/*
+	 * From now, we can claim that the use reference on the
+	 * coveredvp is ours, and the ref can be released only by
+	 * successfull unmount by us, or left for later unmount
+	 * attempt.  The previously acquired hold reference is no
+	 * longer needed to protect the vnode from reuse.
+	 */
+	if (coveredvp != NULL)
+		vdrop(coveredvp);
+
 	vfs_msync(mp, MNT_WAIT);
 	MNT_ILOCK(mp);
 	async_flag = mp->mnt_flag & MNT_ASYNC;
 	mp->mnt_flag &= ~MNT_ASYNC;
 	mp->mnt_kern_flag &= ~MNTK_ASYNC;
 	MNT_IUNLOCK(mp);
-	cache_purgevfs(mp);	/* remove cache entries for this file sys */
+	cache_purgevfs(mp, false); /* remove cache entries for this file sys */
 	vfs_deallocate_syncvnode(mp);
 	/*
 	 * For forced unmounts, move process cdir/rdir refs on the fs root
@@ -1298,7 +1371,8 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	 */
 	if ((flags & MNT_FORCE) &&
 	    VFS_ROOT(mp, LK_EXCLUSIVE, &fsrootvp) == 0) {
-		if (mp->mnt_vnodecovered != NULL)
+		if (mp->mnt_vnodecovered != NULL &&
+		    (mp->mnt_flag & MNT_IGNORE) == 0)
 			mountcheckdirs(fsrootvp, mp->mnt_vnodecovered);
 		if (fsrootvp == rootvnode) {
 			vrele(rootvnode);
@@ -1319,7 +1393,8 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	if (error && error != ENXIO) {
 		if ((flags & MNT_FORCE) &&
 		    VFS_ROOT(mp, LK_EXCLUSIVE, &fsrootvp) == 0) {
-			if (mp->mnt_vnodecovered != NULL)
+			if (mp->mnt_vnodecovered != NULL &&
+			    (mp->mnt_flag & MNT_IGNORE) == 0)
 				mountcheckdirs(mp->mnt_vnodecovered, fsrootvp);
 			if (rootvnode == NULL) {
 				rootvnode = fsrootvp;
@@ -1354,7 +1429,7 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	EVENTHANDLER_INVOKE(vfs_unmounted, mp, td);
 	if (coveredvp != NULL) {
 		coveredvp->v_mountedhere = NULL;
-		vput(coveredvp);
+		VOP_UNLOCK(coveredvp, 0);
 	}
 	vfs_event_signal(NULL, VQ_UNMOUNT, 0);
 	if (mp == rootdevmp)
@@ -1466,11 +1541,7 @@ vfs_filteropt(struct vfsoptlist *opts, const char **legal)
  * with the address of the option.
  */
 int
-vfs_getopt(opts, name, buf, len)
-	struct vfsoptlist *opts;
-	const char *name;
-	void **buf;
-	int *len;
+vfs_getopt(struct vfsoptlist *opts, const char *name, void **buf, int *len)
 {
 	struct vfsopt *opt;
 
@@ -1683,11 +1754,7 @@ vfs_setopts(struct vfsoptlist *opts, const char *name, const char *value)
  * Returns ENOENT if the option is not found.
  */
 int
-vfs_copyopt(opts, name, dest, len)
-	struct vfsoptlist *opts;
-	const char *name;
-	void *dest;
-	int len;
+vfs_copyopt(struct vfsoptlist *opts, const char *name, void *dest, int len)
 {
 	struct vfsopt *opt;
 

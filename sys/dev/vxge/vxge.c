@@ -996,7 +996,6 @@ vxge_rx_compl(vxge_hal_vpath_h vpath_handle, vxge_hal_rxd_h rxdh,
 	vxge_vpath_t *vpath = (vxge_vpath_t *) userdata;
 	vxge_dev_t *vdev = vpath->vdev;
 
-	struct lro_entry *queued = NULL;
 	struct lro_ctrl *lro = &vpath->lro;
 
 	/* get the interface pointer */
@@ -1083,12 +1082,8 @@ vxge_rx_compl(vxge_hal_vpath_h vpath_handle, vxge_hal_rxd_h rxdh,
 	    &dtr_priv, &t_code) == VXGE_HAL_OK);
 
 	/* Flush any outstanding LRO work */
-	if (vpath->lro_enable && vpath->lro.lro_cnt) {
-		while ((queued = SLIST_FIRST(&lro->lro_active)) != NULL) {
-			SLIST_REMOVE_HEAD(&lro->lro_active, next);
-			tcp_lro_flush(lro, queued);
-		}
-	}
+	if (vpath->lro_enable && vpath->lro.lro_cnt)
+		tcp_lro_flush_all(lro);
 
 	return (status);
 }
@@ -2317,7 +2312,7 @@ vxge_vpath_open(vxge_dev_t *vdev)
 		vpath->rx_ticks = ticks;
 
 		vpath->tti_rtimer_val = VXGE_DEFAULT_TTI_RTIMER_VAL;
-		vpath->tti_rtimer_val = VXGE_DEFAULT_TTI_RTIMER_VAL;
+		vpath->rti_rtimer_val = VXGE_DEFAULT_RTI_RTIMER_VAL;
 
 		vpath->tx_intr_coalesce = vdev->config.intr_coalesce;
 		vpath->rx_intr_coalesce = vdev->config.intr_coalesce;

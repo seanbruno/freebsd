@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
  */
 
 #include <sys/disk.h>
+#include <sys/limits.h>
 #include <stand.h>
 #include <machine/bootinfo.h>
 #include <stdarg.h>
@@ -48,6 +49,34 @@ __FBSDID("$FreeBSD$");
 #include <edd.h>
 #include "disk.h"
 #include "libi386.h"
+
+#ifdef LOADER_GELI_SUPPORT
+#include "cons.h"
+#include "drv.h"
+#include "gpt.h"
+#include "part.h"
+#include <uuid.h>
+struct pentry {
+	struct ptable_entry	part;
+	uint64_t		flags;
+	union {
+		uint8_t bsd;
+		uint8_t	mbr;
+		uuid_t	gpt;
+		uint16_t vtoc8;
+	} type;
+	STAILQ_ENTRY(pentry)	entry;
+};
+struct ptable {
+	enum ptable_type	type;
+	uint16_t		sectorsize;
+	uint64_t		sectors;
+
+	STAILQ_HEAD(, pentry)	entries;
+};
+
+#include "geliboot.c"
+#endif /* LOADER_GELI_SUPPORT */
 
 CTASSERT(sizeof(struct i386_devdesc) >= sizeof(struct disk_devdesc));
 
@@ -86,6 +115,8 @@ static struct bdinfo
 	int		bd_type;	/* BIOS 'drive type' (floppy only) */
 	uint16_t	bd_sectorsize;	/* Sector size */
 	uint64_t	bd_sectors;	/* Disk size */
+	int		bd_open;	/* reference counter */
+	void		*bd_bcache;	/* buffer cache data */
 } bdinfo [MAXBDDEV];
 static int nbdinfo = 0;
 
@@ -100,13 +131,24 @@ static int bd_int13probe(struct bdinfo *bd);
 static int bd_init(void);
 static int bd_strategy(void *devdata, int flag, daddr_t dblk, size_t size,
     char *buf, size_t *rsize);
-static int bd_realstrategy(void *devdata, int flag, daddr_t dblk,
-    size_t size, char *buf, size_t *rsize);
+static int bd_realstrategy(void *devdata, int flag, daddr_t dblk, size_t size,
+    char *buf, size_t *rsize);
 static int bd_open(struct open_file *f, ...);
 static int bd_close(struct open_file *f);
 static int bd_ioctl(struct open_file *f, u_long cmd, void *data);
-static void bd_print(int verbose);
-static void bd_cleanup(void);
+static int bd_print(int verbose);
+
+#ifdef LOADER_GELI_SUPPORT
+enum isgeli {
+	ISGELI_UNKNOWN,
+	ISGELI_NO,
+	ISGELI_YES
+};
+static enum isgeli geli_status[MAXBDDEV][MAXTBLENTS];
+
+int bios_read(void *vdev __unused, struct dsk *priv, off_t off, char *buf,
+    size_t bytes);
+#endif /* LOADER_GELI_SUPPORT */
 
 struct devsw biosdisk = {
 	"disk",
@@ -117,7 +159,7 @@ struct devsw biosdisk = {
 	bd_close,
 	bd_ioctl,
 	bd_print,
-	bd_cleanup
+	NULL
 };
 
 /*
@@ -154,6 +196,9 @@ bd_init(void)
 {
 	int base, unit, nfd = 0;
 
+#ifdef LOADER_GELI_SUPPORT
+	geli_init();
+#endif
 	/* sequence 0, 0x80 */
 	for (base = 0; base <= 0x80; base += 0x80) {
 		for (unit = base; (nbdinfo < MAXBDDEV); unit++) {
@@ -166,6 +211,8 @@ bd_init(void)
 			    (nfd >= *(unsigned char *)PTOV(BIOS_NUMDRIVES)))
 				break;
 #endif
+			bdinfo[nbdinfo].bd_open = 0;
+			bdinfo[nbdinfo].bd_bcache = NULL;
 			bdinfo[nbdinfo].bd_unit = unit;
 			bdinfo[nbdinfo].bd_flags = unit < 0x80 ? BD_FLOPPY: 0;
 			if (!bd_int13probe(&bdinfo[nbdinfo]))
@@ -179,14 +226,8 @@ bd_init(void)
 				nfd++;
 		}
 	}
+	bcache_add_dev(nbdinfo);
 	return(0);
-}
-
-static void
-bd_cleanup(void)
-{
-
-	disk_cleanup(&biosdisk);
 }
 
 /*
@@ -196,6 +237,7 @@ static int
 bd_int13probe(struct bdinfo *bd)
 {
 	struct edd_params params;
+	int ret = 1;	/* assume success */
 
 	v86.ctl = V86_FLAGS;
 	v86.addr = 0x13;
@@ -203,10 +245,13 @@ bd_int13probe(struct bdinfo *bd)
 	v86.edx = bd->bd_unit;
 	v86int();
 
+	/* Don't error out if we get bad sector number, try EDD as well */
 	if (V86_CY(v86.efl) ||	/* carry set */
-	    (v86.ecx & 0x3f) == 0 || /* absurd sector number */
 	    (v86.edx & 0xff) <= (unsigned)(bd->bd_unit & 0x7f))	/* unit # bad */
 		return (0);	/* skip device */
+
+	if ((v86.ecx & 0x3f) == 0) /* absurd sector number */
+		ret = 0;	/* set error */
 
 	/* Convert max cyl # -> # of cylinders */
 	bd->bd_cyl = ((v86.ecx & 0xc0) << 2) + ((v86.ecx & 0xff00) >> 8) + 1;
@@ -232,7 +277,8 @@ bd_int13probe(struct bdinfo *bd)
 	if (V86_CY(v86.efl) ||	/* carry set */
 	    (v86.ebx & 0xffff) != 0xaa55 || /* signature */
 	    (v86.ecx & EDD_INTERFACE_FIXED_DISK) == 0)
-		return (1);
+		return (ret);	/* return code from int13 AH=08 */
+
 	/* EDD supported */
 	bd->bd_flags |= BD_MODEEDD1;
 	if ((v86.eax & 0xff00) >= 0x3000)
@@ -247,43 +293,78 @@ bd_int13probe(struct bdinfo *bd)
 	v86.esi = VTOPOFF(&params);
 	v86int();
 	if (!V86_CY(v86.efl)) {
-		bd->bd_sectors = params.sectors;
-		bd->bd_sectorsize = params.sector_size;
+		uint64_t total;
+
+		/*
+		 * Sector size must be a multiple of 512 bytes.
+		 * An alternate test would be to check power of 2,
+		 * powerof2(params.sector_size).
+		 */
+		if (params.sector_size % BIOSDISK_SECSIZE)
+			bd->bd_sectorsize = BIOSDISK_SECSIZE;
+		else
+			bd->bd_sectorsize = params.sector_size;
+
+		total = bd->bd_sectorsize * params.sectors;
+		if (params.sectors != 0) {
+			/* Only update if we did not overflow. */
+			if (total > params.sectors)
+				bd->bd_sectors = params.sectors;
+		}
+
+		total = (uint64_t)params.cylinders *
+		    params.heads * params.sectors_per_track;
+		if (bd->bd_sectors < total)
+			bd->bd_sectors = total;
+
+		ret = 1;
 	}
 	DEBUG("unit 0x%x flags %x, sectors %llu, sectorsize %u",
 	    bd->bd_unit, bd->bd_flags, bd->bd_sectors, bd->bd_sectorsize);
-	return (1);
+	return (ret);
 }
 
 /*
  * Print information about disks
  */
-static void
+static int
 bd_print(int verbose)
 {
 	static char line[80];
 	struct disk_devdesc dev;
-	int i;
+	int i, ret = 0;
+
+	if (nbdinfo == 0)
+		return (0);
+
+	printf("%s devices:", biosdisk.dv_name);
+	if ((ret = pager_output("\n")) != 0)
+		return (ret);
 
 	for (i = 0; i < nbdinfo; i++) {
-		sprintf(line, "    disk%d:   BIOS drive %c:\n", i,
+		snprintf(line, sizeof(line),
+		    "    disk%d:   BIOS drive %c (%ju X %u):\n", i,
 		    (bdinfo[i].bd_unit < 0x80) ? ('A' + bdinfo[i].bd_unit):
-		    ('C' + bdinfo[i].bd_unit - 0x80));
-		pager_output(line);
+		    ('C' + bdinfo[i].bd_unit - 0x80),
+		    (uintmax_t)bdinfo[i].bd_sectors,
+		    bdinfo[i].bd_sectorsize);
+		if ((ret = pager_output(line)) != 0)
+			break;
 		dev.d_dev = &biosdisk;
 		dev.d_unit = i;
 		dev.d_slice = -1;
 		dev.d_partition = -1;
 		if (disk_open(&dev,
 		    bdinfo[i].bd_sectorsize * bdinfo[i].bd_sectors,
-		    bdinfo[i].bd_sectorsize,
-		    (bdinfo[i].bd_flags & BD_FLOPPY) ?
-		    DISK_F_NOCACHE: 0) == 0) {
-			sprintf(line, "    disk%d", i);
-			disk_print(&dev, line, verbose);
+		    bdinfo[i].bd_sectorsize) == 0) {
+			snprintf(line, sizeof(line), "    disk%d", i);
+			ret = disk_print(&dev, line, verbose);
 			disk_close(&dev);
+			if (ret != 0)
+			    return (ret);
 		}
 	}
+	return (ret);
 }
 
 /*
@@ -299,8 +380,11 @@ bd_print(int verbose)
 static int
 bd_open(struct open_file *f, ...)
 {
-	struct disk_devdesc *dev;
+	struct disk_devdesc *dev, rdev;
+	struct disk_devdesc disk;
+	int err, g_err;
 	va_list ap;
+	uint64_t size;
 
 	va_start(ap, f);
 	dev = va_arg(ap, struct disk_devdesc *);
@@ -308,10 +392,117 @@ bd_open(struct open_file *f, ...)
 
 	if (dev->d_unit < 0 || dev->d_unit >= nbdinfo)
 		return (EIO);
+	BD(dev).bd_open++;
+	if (BD(dev).bd_bcache == NULL)
+	    BD(dev).bd_bcache = bcache_allocate();
 
-	return (disk_open(dev, BD(dev).bd_sectors * BD(dev).bd_sectorsize,
-	    BD(dev).bd_sectorsize, (BD(dev).bd_flags & BD_FLOPPY) ?
-	    DISK_F_NOCACHE: 0));
+	/*
+	 * Read disk size from partition.
+	 * This is needed to work around buggy BIOS systems returning
+	 * wrong (truncated) disk media size.
+	 * During bd_probe() we tested if the mulitplication of bd_sectors
+	 * would overflow so it should be safe to perform here.
+	 */
+	disk.d_dev = dev->d_dev;
+	disk.d_type = dev->d_type;
+	disk.d_unit = dev->d_unit;
+	disk.d_opendata = NULL;
+	disk.d_slice = -1;
+	disk.d_partition = -1;
+	disk.d_offset = 0;
+	if (disk_open(&disk, BD(dev).bd_sectors * BD(dev).bd_sectorsize,
+	    BD(dev).bd_sectorsize) == 0) {
+
+		if (disk_ioctl(&disk, DIOCGMEDIASIZE, &size) == 0) {
+			size /= BD(dev).bd_sectorsize;
+			if (size > BD(dev).bd_sectors)
+				BD(dev).bd_sectors = size;
+		}
+		disk_close(&disk);
+	}
+
+	err = disk_open(dev, BD(dev).bd_sectors * BD(dev).bd_sectorsize,
+	    BD(dev).bd_sectorsize);
+
+#ifdef LOADER_GELI_SUPPORT
+	static char gelipw[GELI_PW_MAXLEN];
+	char *passphrase;
+
+	if (err)
+		return (err);
+
+	/* if we already know there is no GELI, skip the rest */
+	if (geli_status[dev->d_unit][dev->d_slice] != ISGELI_UNKNOWN)
+		return (err);
+
+	struct dsk dskp;
+	struct ptable *table = NULL;
+	struct ptable_entry part;
+	struct pentry *entry;
+	int geli_part = 0;
+
+	dskp.drive = bd_unit2bios(dev->d_unit);
+	dskp.type = dev->d_type;
+	dskp.unit = dev->d_unit;
+	dskp.slice = dev->d_slice;
+	dskp.part = dev->d_partition;
+	dskp.start = dev->d_offset;
+
+	memcpy(&rdev, dev, sizeof(rdev));
+	/* to read the GPT table, we need to read the first sector */
+	rdev.d_offset = 0;
+	/* We need the LBA of the end of the partition */
+	table = ptable_open(&rdev, BD(dev).bd_sectors,
+	    BD(dev).bd_sectorsize, ptblread);
+	if (table == NULL) {
+		DEBUG("Can't read partition table");
+		/* soft failure, return the exit status of disk_open */
+		return (err);
+	}
+
+	if (table->type == PTABLE_GPT)
+		dskp.part = 255;
+
+	STAILQ_FOREACH(entry, &table->entries, entry) {
+		dskp.slice = entry->part.index;
+		dskp.start = entry->part.start;
+		if (is_geli(&dskp) == 0) {
+			geli_status[dev->d_unit][dskp.slice] = ISGELI_YES;
+			return (0);
+		}
+		if (geli_taste(bios_read, &dskp,
+		    entry->part.end - entry->part.start) == 0) {
+			if (geli_havekey(&dskp) == 0) {
+				geli_status[dev->d_unit][dskp.slice] = ISGELI_YES;
+				geli_part++;
+				continue;
+			}
+			if ((passphrase = getenv("kern.geom.eli.passphrase"))
+			    != NULL) {
+				/* Use the cached passphrase */
+				bcopy(passphrase, &gelipw, GELI_PW_MAXLEN);
+			}
+			if (geli_passphrase(&gelipw, dskp.unit, 'p',
+				    (dskp.slice > 0 ? dskp.slice : dskp.part),
+				    &dskp) == 0) {
+				setenv("kern.geom.eli.passphrase", &gelipw, 1);
+				bzero(gelipw, sizeof(gelipw));
+				geli_status[dev->d_unit][dskp.slice] = ISGELI_YES;
+				geli_part++;
+				continue;
+			}
+		} else
+			geli_status[dev->d_unit][dskp.slice] = ISGELI_NO;
+	}
+
+	/* none of the partitions on this disk have GELI */
+	if (geli_part == 0) {
+		/* found no GELI */
+		geli_status[dev->d_unit][dev->d_slice] = ISGELI_NO;
+	}
+#endif /* LOADER_GELI_SUPPORT */
+
+	return (err);
 }
 
 static int
@@ -320,6 +511,11 @@ bd_close(struct open_file *f)
 	struct disk_devdesc *dev;
 
 	dev = (struct disk_devdesc *)f->f_devdata;
+	BD(dev).bd_open--;
+	if (BD(dev).bd_open == 0) {
+	    bcache_free(BD(dev).bd_bcache);
+	    BD(dev).bd_bcache = NULL;
+	}
 	return (disk_close(dev));
 }
 
@@ -327,14 +523,20 @@ static int
 bd_ioctl(struct open_file *f, u_long cmd, void *data)
 {
 	struct disk_devdesc *dev;
+	int rc;
 
 	dev = (struct disk_devdesc *)f->f_devdata;
+
+	rc = disk_ioctl(dev, cmd, data);
+	if (rc != ENOTTY)
+		return (rc);
+
 	switch (cmd) {
 	case DIOCGSECTORSIZE:
 		*(u_int *)data = BD(dev).bd_sectorsize;
 		break;
 	case DIOCGMEDIASIZE:
-		*(off_t *)data = BD(dev).bd_sectors * BD(dev).bd_sectorsize;
+		*(uint64_t *)data = BD(dev).bd_sectors * BD(dev).bd_sectorsize;
 		break;
 	default:
 		return (ENOTTY);
@@ -343,8 +545,8 @@ bd_ioctl(struct open_file *f, u_long cmd, void *data)
 }
 
 static int
-bd_strategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf,
-    size_t *rsize)
+bd_strategy(void *devdata, int rw, daddr_t dblk, size_t size,
+    char *buf, size_t *rsize)
 {
 	struct bcache_devdata bcd;
 	struct disk_devdesc *dev;
@@ -352,16 +554,18 @@ bd_strategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf,
 	dev = (struct disk_devdesc *)devdata;
 	bcd.dv_strategy = bd_realstrategy;
 	bcd.dv_devdata = devdata;
-	return (bcache_strategy(&bcd, BD(dev).bd_unit, rw, dblk + dev->d_offset,
+	bcd.dv_cache = BD(dev).bd_bcache;
+	return (bcache_strategy(&bcd, rw, dblk + dev->d_offset,
 	    size, buf, rsize));
 }
 
 static int
-bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf,
-    size_t *rsize)
+bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size,
+    char *buf, size_t *rsize)
 {
     struct disk_devdesc *dev = (struct disk_devdesc *)devdata;
-    int			blks;
+    uint64_t		disk_blocks;
+    int			blks, rc;
 #ifdef BD_SUPPORT_FRAGS /* XXX: sector size */
     char		fragbuf[BIOSDISK_SECSIZE];
     size_t		fragsize;
@@ -373,16 +577,57 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf,
 #endif
 
     DEBUG("open_disk %p", dev);
+
+    /*
+     * Check the value of the size argument. We do have quite small
+     * heap (64MB), but we do not know good upper limit, so we check against
+     * INT_MAX here. This will also protect us against possible overflows
+     * while translating block count to bytes.
+     */
+    if (size > INT_MAX) {
+	DEBUG("too large read: %zu bytes", size);
+	return (EIO);
+    }
+
     blks = size / BD(dev).bd_sectorsize;
+    if (dblk > dblk + blks)
+	return (EIO);
+
     if (rsize)
 	*rsize = 0;
 
-    switch(rw){
+    /* Get disk blocks, this value is either for whole disk or for partition */
+    if (disk_ioctl(dev, DIOCGMEDIASIZE, &disk_blocks)) {
+	/* DIOCGMEDIASIZE does return bytes. */
+        disk_blocks /= BD(dev).bd_sectorsize;
+    } else {
+	/* We should not get here. Just try to survive. */
+	disk_blocks = BD(dev).bd_sectors - dev->d_offset;
+    }
+
+    /* Validate source block address. */
+    if (dblk < dev->d_offset || dblk >= dev->d_offset + disk_blocks)
+	return (EIO);
+
+    /*
+     * Truncate if we are crossing disk or partition end.
+     */
+    if (dblk + blks >= dev->d_offset + disk_blocks) {
+	blks = dev->d_offset + disk_blocks - dblk;
+	size = blks * BD(dev).bd_sectorsize;
+	DEBUG("short read %d", blks);
+    }
+
+    switch (rw & F_MASK) {
     case F_READ:
 	DEBUG("read %d from %lld to %p", blks, dblk, buf);
 
-	if (blks && bd_read(dev, dblk, blks, buf)) {
-	    DEBUG("read error");
+	if (blks && (rc = bd_read(dev, dblk, blks, buf))) {
+	    /* Filter out floppy controller errors */
+	    if (BD(dev).bd_flags != BD_FLOPPY || rc != 0x20) {
+		printf("read %d from %lld to %p, error: 0x%x", blks, dblk,
+		    buf, rc);
+	    }
 	    return (EIO);
 	}
 #ifdef BD_SUPPORT_FRAGS /* XXX: sector size */
@@ -419,9 +664,6 @@ bd_realstrategy(void *devdata, int rw, daddr_t dblk, size_t size, char *buf,
     return (0);
 }
 
-/* Max number of sectors to bounce-buffer if the request crosses a 64k boundary */
-#define FLOPPY_BOUNCEBUF	18
-
 static int
 bd_edd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
     int write)
@@ -444,7 +686,9 @@ bd_edd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
     v86.ds = VTOPSEG(&packet);
     v86.esi = VTOPOFF(&packet);
     v86int();
-    return (V86_CY(v86.efl));
+    if (V86_CY(v86.efl))
+	return (v86.eax >> 8);
+    return (0);
 }
 
 static int
@@ -478,14 +722,16 @@ bd_chs_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest,
     v86.es = VTOPSEG(dest);
     v86.ebx = VTOPOFF(dest);
     v86int();
-    return (V86_CY(v86.efl));
+    if (V86_CY(v86.efl))
+	return (v86.eax >> 8);
+    return (0);
 }
 
 static int
 bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest, int write)
 {
     u_int	x, sec, result, resid, retry, maxfer;
-    caddr_t	p, xp, bbuf, breg;
+    caddr_t	p, xp, bbuf;
     
     /* Just in case some idiot actually tries to read/write -1 blocks... */
     if (blks < 0)
@@ -507,17 +753,12 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest, int write)
 	 * as we need to.  Use the bottom half unless there is a break
 	 * there, in which case we use the top half.
 	 */
-	x = min(FLOPPY_BOUNCEBUF, (unsigned)blks);
-	bbuf = alloca(x * 2 * BD(dev).bd_sectorsize);
-	if (((u_int32_t)VTOP(bbuf) & 0xffff0000) ==
-	    ((u_int32_t)VTOP(bbuf + x * BD(dev).bd_sectorsize) & 0xffff0000)) {
-	    breg = bbuf;
-	} else {
-	    breg = bbuf + x * BD(dev).bd_sectorsize;
-	}
+	x = V86_IO_BUFFER_SIZE / BD(dev).bd_sectorsize;
+	x = min(x, (unsigned)blks);
+	bbuf = PTOV(V86_IO_BUFFER);
 	maxfer = x;		/* limit transfers to bounce region size */
     } else {
-	breg = bbuf = NULL;
+	bbuf = NULL;
 	maxfer = 0;
     }
     
@@ -532,14 +773,14 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest, int write)
 	    x = min(x, maxfer);		/* fit bounce buffer */
 
 	/* where do we transfer to? */
-	xp = bbuf == NULL ? p : breg;
+	xp = bbuf == NULL ? p : bbuf;
 
 	/*
 	 * Put your Data In, Put your Data out,
 	 * Put your Data In, and shake it all about 
 	 */
 	if (write && bbuf != NULL)
-	    bcopy(p, breg, x * BD(dev).bd_sectorsize);
+	    bcopy(p, bbuf, x * BD(dev).bd_sectorsize);
 
 	/*
 	 * Loop retrying the operation a couple of times.  The BIOS
@@ -570,10 +811,10 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest, int write)
 	    DEBUG("Read %d sector(s) from %lld to %p (0x%x) %s", x,
 		dblk, p, VTOP(p), result ? "failed" : "ok");
 	if (result) {
-	    return(-1);
+	    return (result);
 	}
 	if (!write && bbuf != NULL)
-	    bcopy(breg, p, x * BD(dev).bd_sectorsize);
+	    bcopy(bbuf, p, x * BD(dev).bd_sectorsize);
 	p += (x * BD(dev).bd_sectorsize);
 	dblk += x;
 	resid -= x;
@@ -586,6 +827,73 @@ bd_io(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest, int write)
 static int
 bd_read(struct disk_devdesc *dev, daddr_t dblk, int blks, caddr_t dest)
 {
+#ifdef LOADER_GELI_SUPPORT
+	struct dsk dskp;
+	off_t p_off, diff;
+	daddr_t alignlba;
+	int err, n, alignblks;
+	char *tmpbuf;
+
+	/* if we already know there is no GELI, skip the rest */
+	if (geli_status[dev->d_unit][dev->d_slice] != ISGELI_YES)
+		return (bd_io(dev, dblk, blks, dest, 0));
+
+	if (geli_status[dev->d_unit][dev->d_slice] == ISGELI_YES) {
+		/*
+		 * Align reads to DEV_GELIBOOT_BSIZE bytes because partial
+		 * sectors cannot be decrypted. Round the requested LBA down to
+		 * nearest multiple of DEV_GELIBOOT_BSIZE bytes.
+		 */
+		alignlba = rounddown2(dblk * BD(dev).bd_sectorsize,
+		    DEV_GELIBOOT_BSIZE) / BD(dev).bd_sectorsize;
+		/*
+		 * Round number of blocks to read up to nearest multiple of
+		 * DEV_GELIBOOT_BSIZE
+		 */
+		diff = (dblk - alignlba) * BD(dev).bd_sectorsize;
+		alignblks = roundup2(blks * BD(dev).bd_sectorsize + diff,
+		    DEV_GELIBOOT_BSIZE) / BD(dev).bd_sectorsize;
+
+		/*
+		 * If the read is rounded up to a larger size, use a temporary
+		 * buffer here because the buffer provided by the caller may be
+		 * too small.
+		 */
+		if (diff == 0) {
+			tmpbuf = dest;
+		} else {
+			tmpbuf = malloc(alignblks * BD(dev).bd_sectorsize);
+			if (tmpbuf == NULL) {
+				return (-1);
+			}
+		}
+
+		err = bd_io(dev, alignlba, alignblks, tmpbuf, 0);
+		if (err)
+			return (err);
+
+		dskp.drive = bd_unit2bios(dev->d_unit);
+		dskp.type = dev->d_type;
+		dskp.unit = dev->d_unit;
+		dskp.slice = dev->d_slice;
+		dskp.part = dev->d_partition;
+		dskp.start = dev->d_offset;
+
+		/* GELI needs the offset relative to the partition start */
+		p_off = alignlba - dskp.start;
+
+		err = geli_read(&dskp, p_off * BD(dev).bd_sectorsize, tmpbuf,
+		    alignblks * BD(dev).bd_sectorsize);
+		if (err)
+			return (err);
+
+		if (tmpbuf != dest) {
+			bcopy(tmpbuf + diff, dest, blks * BD(dev).bd_sectorsize);
+			free(tmpbuf);
+		}
+		return (0);
+	}
+#endif /* LOADER_GELI_SUPPORT */
 
 	return (bd_io(dev, dblk, blks, dest, 0));
 }
@@ -648,8 +956,7 @@ bd_getdev(struct i386_devdesc *d)
     if (biosdev == -1)				/* not a BIOS device */
 	return(-1);
     if (disk_open(dev, BD(dev).bd_sectors * BD(dev).bd_sectorsize,
-	BD(dev).bd_sectorsize,(BD(dev).bd_flags & BD_FLOPPY) ?
-	DISK_F_NOCACHE: 0) != 0)		/* oops, not a viable device */
+	BD(dev).bd_sectorsize) != 0)		/* oops, not a viable device */
 	    return (-1);
     else
 	disk_close(dev);
@@ -682,3 +989,25 @@ bd_getdev(struct i386_devdesc *d)
     DEBUG("dev is 0x%x\n", rootdev);
     return(rootdev);
 }
+
+#ifdef LOADER_GELI_SUPPORT
+int
+bios_read(void *vdev __unused, struct dsk *priv, off_t off, char *buf, size_t bytes)
+{
+	struct disk_devdesc dev;
+
+	dev.d_dev = &biosdisk;
+	dev.d_type = priv->type;
+	dev.d_unit = priv->unit;
+	dev.d_slice = priv->slice;
+	dev.d_partition = priv->part;
+	dev.d_offset = priv->start;
+
+	off = off / BD(&dev).bd_sectorsize;
+	/* GELI gives us the offset relative to the partition start */
+	off += dev.d_offset;
+	bytes = bytes / BD(&dev).bd_sectorsize;
+
+	return (bd_io(&dev, off, bytes, buf, 0));
+}
+#endif /* LOADER_GELI_SUPPORT */

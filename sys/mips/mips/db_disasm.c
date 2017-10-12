@@ -104,7 +104,11 @@ static char *fmt_name[16] = {
 
 static char *reg_name[32] = {
 	"zero",	"at",	"v0",	"v1",	"a0",	"a1",	"a2",	"a3",
+#if defined(__mips_n32) || defined(__mips_n64)
+	"a4",	"a5",	"a6",	"a7",	"t0",	"t1",	"t2",	"t3",
+#else
 	"t0",	"t1",	"t2",	"t3",	"t4",	"t5",	"t6",	"t7",
+#endif
 	"s0",	"s1",	"s2",	"s3",	"s4",	"s5",	"s6",	"s7",
 	"t8",	"t9",	"k0",	"k1",	"gp",	"sp",	"s8",	"ra"
 };
@@ -226,7 +230,7 @@ md_printins(int ins, int mdbdot)
 		default:
 			db_printf("\t%s,%s,%s", reg_name[i.RType.rd],
 			    reg_name[i.RType.rs], reg_name[i.RType.rt]);
-		};
+		}
 		break;
 
 	case OP_BCOND:
@@ -288,7 +292,7 @@ md_printins(int ins, int mdbdot)
 
 		default:
 			db_printf("%s", c0_opname[i.FRType.func]);
-		};
+		}
 		break;
 
 	case OP_COP1:
@@ -323,7 +327,7 @@ md_printins(int ins, int mdbdot)
 			db_printf("%s.%s\tf%d,f%d,f%d",
 			    cop1_name[i.FRType.func], fmt_name[i.FRType.fmt],
 			    i.FRType.fd, i.FRType.fs, i.FRType.ft);
-		};
+		}
 		break;
 
 	case OP_J:

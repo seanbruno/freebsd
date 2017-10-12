@@ -185,7 +185,7 @@ static int _bsd_to_linux_trapcode[] = {
 	15			/* 30 T_RESERVED */
 };
 #define bsd_to_linux_trapcode(code) \
-    ((code)<sizeof(_bsd_to_linux_trapcode)/sizeof(*_bsd_to_linux_trapcode)? \
+    ((code)<nitems(_bsd_to_linux_trapcode)? \
      _bsd_to_linux_trapcode[(code)]: \
      LINUX_T_UNKNOWN)
 
@@ -725,13 +725,15 @@ linux_rt_sigreturn(struct thread *td, struct linux_rt_sigreturn_args *args)
 }
 
 static int
-linux32_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
+linux32_fetch_syscall_args(struct thread *td)
 {
 	struct proc *p;
 	struct trapframe *frame;
+	struct syscall_args *sa;
 
 	p = td->td_proc;
 	frame = td->td_frame;
+	sa = &td->td_sa;
 
 	sa->args[0] = frame->tf_rbx;
 	sa->args[1] = frame->tf_rcx;
@@ -862,7 +864,7 @@ linux_copyout_strings(struct image_params *imgp)
 	destp =	(caddr_t)arginfo - SPARE_USRSPACE -
 	    roundup(sizeof(canary), sizeof(char *)) -
 	    roundup(execpath_len, sizeof(char *)) -
-	    roundup((ARG_MAX - imgp->args->stringspace), sizeof(char *));
+	    roundup(ARG_MAX - imgp->args->stringspace, sizeof(char *));
 
 	if (execpath_len != 0) {
 		imgp->execpathp = (uintptr_t)arginfo - execpath_len;
@@ -1060,14 +1062,14 @@ linux_vdso_install(void *param)
 	linux_shared_page_obj = __elfN(linux_shared_page_init)
 	    (&linux_shared_page_mapping);
 
-	__elfN(linux_vdso_reloc)(&elf_linux_sysvec, LINUX32_SHAREDPAGE);
+	__elfN(linux_vdso_reloc)(&elf_linux_sysvec);
 
 	bcopy(elf_linux_sysvec.sv_sigcode, linux_shared_page_mapping,
 	    linux_szsigcode);
 	elf_linux_sysvec.sv_shared_page_obj = linux_shared_page_obj;
 
 	linux_kplatform = linux_shared_page_mapping +
-	    (linux_platform - (caddr_t)LINUX32_SHAREDPAGE);
+	    (linux_platform - (caddr_t)elf_linux_sysvec.sv_shared_page_base);
 }
 SYSINIT(elf_linux_vdso_init, SI_SUB_EXEC, SI_ORDER_ANY,
     (sysinit_cfunc_t)linux_vdso_install, NULL);
@@ -1139,9 +1141,22 @@ static Elf32_Brandinfo linux_glibc2brand = {
 	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
 };
 
+static Elf32_Brandinfo linux_muslbrand = {
+	.brand		= ELFOSABI_LINUX,
+	.machine	= EM_386,
+	.compat_3_brand	= "Linux",
+	.emul_path	= "/compat/linux",
+	.interp_path	= "/lib/ld-musl-i386.so.1",
+	.sysvec		= &elf_linux_sysvec,
+	.interp_newpath	= NULL,
+	.brand_note	= &linux32_brandnote,
+	.flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE
+};
+
 Elf32_Brandinfo *linux_brandlist[] = {
 	&linux_brand,
 	&linux_glibc2brand,
+	&linux_muslbrand,
 	NULL
 };
 
@@ -1205,3 +1220,4 @@ static moduledata_t linux_elf_mod = {
 
 DECLARE_MODULE_TIED(linuxelf, linux_elf_mod, SI_SUB_EXEC, SI_ORDER_ANY);
 MODULE_DEPEND(linuxelf, linux_common, 1, 1, 1);
+FEATURE(linux, "Linux 32bit support");

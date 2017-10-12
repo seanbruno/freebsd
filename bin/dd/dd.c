@@ -14,7 +14,7 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 4. Neither the name of the University nor the names of its contributors
+ * 3. Neither the name of the University nor the names of its contributors
  *    may be used to endorse or promote products derived from this software
  *    without specific prior written permission.
  *
@@ -47,11 +47,14 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/stat.h>
+#include <sys/capsicum.h>
 #include <sys/conf.h>
 #include <sys/disklabel.h>
 #include <sys/filio.h>
+#include <sys/mtio.h>
 
 #include <assert.h>
+#include <capsicum_helpers.h>
 #include <ctype.h>
 #include <err.h>
 #include <errno.h>
@@ -82,6 +85,7 @@ size_t	cbsz;			/* conversion block size */
 uintmax_t files_cnt = 1;	/* # of files to copy */
 const	u_char *ctab;		/* conversion table */
 char	fill_char;		/* Character to fill with if defined */
+size_t	speed = 0;		/* maximum speed, in bytes per second */
 volatile sig_atomic_t need_summary;
 
 int
@@ -90,6 +94,10 @@ main(int argc __unused, char *argv[])
 	(void)setlocale(LC_CTYPE, "");
 	jcl(argv);
 	setup();
+
+	caph_cache_catpages();
+	if (cap_enter() == -1 && errno != ENOSYS)
+		err(1, "unable to enter capability mode");
 
 	(void)signal(SIGINFO, siginfo_handler);
 	(void)signal(SIGINT, terminate);
@@ -124,6 +132,8 @@ static void
 setup(void)
 {
 	u_int cnt;
+	cap_rights_t rights;
+	unsigned long cmds[] = { FIODTYPE, MTIOCTOP };
 
 	if (in.name == NULL) {
 		in.name = "stdin";
@@ -136,9 +146,14 @@ setup(void)
 
 	getfdtype(&in);
 
+	cap_rights_init(&rights, CAP_READ, CAP_SEEK);
+	if (cap_rights_limit(in.fd, &rights) == -1 && errno != ENOSYS)
+		err(1, "unable to limit capability rights");
+
 	if (files_cnt > 1 && !(in.flags & ISTAPE))
 		errx(1, "files is not supported for non-tape devices");
 
+	cap_rights_set(&rights, CAP_FTRUNCATE, CAP_IOCTL, CAP_WRITE);
 	if (out.name == NULL) {
 		/* No way to check for read access here. */
 		out.fd = STDOUT_FILENO;
@@ -155,6 +170,7 @@ setup(void)
 		if (out.fd == -1) {
 			out.fd = open(out.name, O_WRONLY | OFLAGS, DEFFILEMODE);
 			out.flags |= NOREAD;
+			cap_rights_clear(&rights, CAP_READ);
 		}
 		if (out.fd == -1)
 			err(1, "%s", out.name);
@@ -162,15 +178,36 @@ setup(void)
 
 	getfdtype(&out);
 
+	if (cap_rights_limit(out.fd, &rights) == -1 && errno != ENOSYS)
+		err(1, "unable to limit capability rights");
+	if (cap_ioctls_limit(out.fd, cmds, nitems(cmds)) == -1 &&
+	    errno != ENOSYS)
+		err(1, "unable to limit capability rights");
+
+	if (in.fd != STDIN_FILENO && out.fd != STDIN_FILENO) {
+		if (caph_limit_stdin() == -1)
+			err(1, "unable to limit capability rights");
+	}
+
+	if (in.fd != STDOUT_FILENO && out.fd != STDOUT_FILENO) {
+		if (caph_limit_stdout() == -1)
+			err(1, "unable to limit capability rights");
+	}
+
+	if (in.fd != STDERR_FILENO && out.fd != STDERR_FILENO) {
+		if (caph_limit_stderr() == -1)
+			err(1, "unable to limit capability rights");
+	}
+
 	/*
 	 * Allocate space for the input and output buffers.  If not doing
 	 * record oriented I/O, only need a single buffer.
 	 */
 	if (!(ddflags & (C_BLOCK | C_UNBLOCK))) {
-		if ((in.db = malloc(out.dbsz + in.dbsz - 1)) == NULL)
+		if ((in.db = malloc((size_t)out.dbsz + in.dbsz - 1)) == NULL)
 			err(1, "input buffer");
 		out.db = in.db;
-	} else if ((in.db = malloc(MAX(in.dbsz, cbsz) + cbsz)) == NULL ||
+	} else if ((in.db = malloc(MAX((size_t)in.dbsz, cbsz) + cbsz)) == NULL ||
 	    (out.db = malloc(out.dbsz + cbsz)) == NULL)
 		err(1, "output buffer");
 
@@ -276,6 +313,29 @@ getfdtype(IO *io)
 		io->flags |= ISSEEK;
 }
 
+/*
+ * Limit the speed by adding a delay before every block read.
+ * The delay (t_usleep) is equal to the time computed from block
+ * size and the specified speed limit (t_target) minus the time
+ * spent on actual read and write operations (t_io).
+ */
+static void
+speed_limit(void)
+{
+	static double t_prev, t_usleep;
+	double t_now, t_io, t_target;
+
+	t_now = secs_elapsed();
+	t_io = t_now - t_prev - t_usleep;
+	t_target = (double)in.dbsz / (double)speed;
+	t_usleep = t_target - t_io;
+	if (t_usleep > 0)
+		usleep(t_usleep * 1000000);
+	else
+		t_usleep = 0;
+	t_prev = t_now;
+}
+
 static void
 dd_in(void)
 {
@@ -292,6 +352,9 @@ dd_in(void)
 				return;
 			break;
 		}
+
+		if (speed > 0)
+			speed_limit();
 
 		/*
 		 * Zero the buffer first if sync; if doing block operations,
@@ -342,7 +405,7 @@ dd_in(void)
 			++st.in_full;
 
 		/* Handle full input blocks. */
-		} else if ((size_t)n == in.dbsz) {
+		} else if ((size_t)n == (size_t)in.dbsz) {
 			in.dbcnt += in.dbrcnt = n;
 			++st.in_full;
 
@@ -499,7 +562,7 @@ dd_out(int force)
 			outp += nw;
 			st.bytes += nw;
 
-			if ((size_t)nw == n && n == out.dbsz)
+			if ((size_t)nw == n && n == (size_t)out.dbsz)
 				++st.out_full;
 			else
 				++st.out_part;
