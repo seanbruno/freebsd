@@ -300,7 +300,7 @@
 #endif
 
 #define IXL_DEV_ERR(_dev, _format, ...) \
-	device_printf(dev, "%s: " _format " (%s:%d)\n", __func__, ##__VA_ARGS__, __FILE__, __LINE__)
+	device_printf(_dev, "%s: " _format " (%s:%d)\n", __func__, ##__VA_ARGS__, __FILE__, __LINE__)
 
 /*
  *****************************************************************************

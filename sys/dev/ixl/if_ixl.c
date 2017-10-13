@@ -109,6 +109,7 @@ static void	 ixl_if_timer(if_ctx_t ctx, uint16_t qid);
 static void	 ixl_if_vlan_register(if_ctx_t ctx, u16 vtag);
 static void	 ixl_if_vlan_unregister(if_ctx_t ctx, u16 vtag);
 static uint64_t	 ixl_if_get_counter(if_ctx_t ctx, ift_counter cnt);
+static void	 ixl_if_vflr_handle(if_ctx_t ctx);
 // static void	 ixl_if_link_intr_enable(if_ctx_t ctx);
 
 /*** Other ***/
@@ -176,6 +177,9 @@ static device_method_t ixl_if_methods[] = {
 	DEVMETHOD(ifdi_vlan_register, ixl_if_vlan_register),
 	DEVMETHOD(ifdi_vlan_unregister, ixl_if_vlan_unregister),
 	DEVMETHOD(ifdi_get_counter, ixl_if_get_counter),
+	DEVMETHOD(ifdi_vflr_handle, ixl_if_vflr_handle),
+	// ifdi_led_func
+	// ifdi_debug
 	DEVMETHOD_END
 };
 
@@ -1295,7 +1299,7 @@ ixl_if_update_admin_status(if_ctx_t ctx)
 
 #ifdef PCI_IOV
 	if (pf->state & IXL_PF_STATE_VF_RESET_REQ)
-		ixl_handle_vflr(pf, 0);
+		iflib_iov_intr_deferred(ctx);
 #endif
 
 	ixl_process_adminq(pf, &pending);
@@ -1531,7 +1535,7 @@ ixl_if_timer(if_ctx_t ctx, uint16_t qid)
 	struct ixl_pf		*pf = vsi->back;
 	//struct i40e_hw		*hw = &pf->hw;
 	//struct ixl_tx_queue	*que = &vsi->tx_queues[qid];
- #if 0
+#if 0
 	u32			mask;
 
 	/*
@@ -1617,6 +1621,14 @@ ixl_if_get_counter(if_ctx_t ctx, ift_counter cnt)
 	default:
 		return (if_get_counter_default(ifp, cnt));
 	}
+}
+
+static void
+ixl_if_vflr_handle(if_ctx_t ctx)
+{
+	IXL_DEV_ERR(iflib_get_dev(ctx), "");
+
+	// TODO: call ixl_handle_vflr()
 }
 
 static int
