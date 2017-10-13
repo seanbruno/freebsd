@@ -331,8 +331,6 @@ ixl_allocate_pci_resources(struct ixl_pf *pf)
 		return (ENXIO);
 	}
 
-	IXL_DEV_ERR(dev, "TEST");
-
 	/* Save off the PCI information */
 	hw->vendor_id = pci_get_vendor(dev);
 	hw->device_id = pci_get_device(dev);
@@ -419,7 +417,7 @@ ixl_if_attach_pre(if_ctx_t ctx)
 		goto err_out;
 	}
 
-	/* Establish a clean starting point */
+	/* Establish a clean starting point and clear PXE mode */
 	i40e_clear_hw(hw);
 	status = i40e_pf_reset(hw);
 	if (status) {
@@ -483,9 +481,6 @@ ixl_if_attach_pre(if_ctx_t ctx)
 		device_printf(dev, "The driver for the device detected "
 		    "an older version of the NVM image than expected.\n"
 		    "Please update the NVM image.\n");
-
-	/* Clear PXE mode */
-	i40e_clear_pxe_mode(hw);
 
 	/* Get capabilities from the device */
 	error = ixl_get_hw_capabilities(pf);
