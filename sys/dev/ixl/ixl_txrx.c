@@ -55,7 +55,7 @@ static void	ixl_rx_checksum(if_rxd_info_t ri, u32 status, u32 error, u8 ptype);
 
 static int	ixl_isc_txd_encap(void *arg, if_pkt_info_t pi);
 static void	ixl_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx);
-static int	ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear);
+//static int	ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear);
 static int	ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear);
 
 static void	ixl_isc_rxd_refill(void *arg, if_rxd_update_t iru);
@@ -414,6 +414,7 @@ ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
 	return (processed);
 }
 
+#if 0
 static int
 ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear)
 {
@@ -432,6 +433,7 @@ ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear)
 
 	return (credits);
 }
+#endif
 
 /*********************************************************************
  *
