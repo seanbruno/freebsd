@@ -287,14 +287,12 @@ ixl_teardown_hw_structs(struct ixl_pf *pf)
 		}
 	}
 
-#if 0
 	/* Shutdown admin queue */
 	status = i40e_shutdown_adminq(hw);
 	if (status)
 		device_printf(dev,
 		    "init: Admin Queue shutdown failure; status %s\n",
 		    i40e_stat_str(hw, status));
-#endif
 
 err_out:
 	return (status);
@@ -2449,7 +2447,7 @@ ixl_rebuild_hw_structs_after_reset(struct ixl_pf *pf)
 
 	// TODO: Find a way to not do the full init_adminq if we can
 	// To avoid allocating DMA memory while we have a lock
-#if 0
+#if 1
 	error = i40e_init_adminq(hw);
 	if (error) {
 		device_printf(dev, "init: Admin queue init failure;"
