@@ -1243,22 +1243,26 @@ ixl_if_update_admin_status(if_ctx_t ctx)
 	if (pf->state & IXL_PF_STATE_CORE_RESET_REQ) {
 		device_printf(pf->dev, "Doing CORE reset...\n");
 		iflib_stop(ctx);
+		mtx_unlock(iflib_ctx_lock_get(ctx));
 		ixl_teardown_hw_structs(pf);
 		wr32(hw, I40E_GLGEN_RTRIG, I40E_GLGEN_RTRIG_CORER_MASK);
 		atomic_set_int(&pf->state, IXL_PF_STATE_ADAPTER_RESETTING);
-		// ixl_handle_empr_reset(pf);
-		// iflib_init_locked(ctx);
+		ixl_handle_empr_reset(pf);
+		mtx_lock(iflib_ctx_lock_get(ctx));
+		iflib_init_locked(ctx);
 		return;
 	}
 
 	if (pf->state & IXL_PF_STATE_GLOB_RESET_REQ) {
 		device_printf(pf->dev, "Doing GLOB reset...\n");
 		iflib_stop(ctx);
+		mtx_unlock(iflib_ctx_lock_get(ctx));
 		ixl_teardown_hw_structs(pf);
 		wr32(hw, I40E_GLGEN_RTRIG, I40E_GLGEN_RTRIG_GLOBR_MASK);
 		atomic_set_int(&pf->state, IXL_PF_STATE_ADAPTER_RESETTING);
-		// ixl_handle_empr_reset(pf);
-		// iflib_init_locked(ctx);
+		ixl_handle_empr_reset(pf);
+		mtx_lock(iflib_ctx_lock_get(ctx));
+		iflib_init_locked(ctx);
 		return;
 	}
 
@@ -1270,11 +1274,13 @@ ixl_if_update_admin_status(if_ctx_t ctx)
 		} else {
 			device_printf(pf->dev, "Doing EMP reset...\n");
 			iflib_stop(ctx);
+			mtx_unlock(iflib_ctx_lock_get(ctx));
 			ixl_teardown_hw_structs(pf);
 			wr32(hw, I40E_GLGEN_RTRIG, I40E_GLGEN_RTRIG_EMPFWR_MASK);
 			atomic_set_int(&pf->state, IXL_PF_STATE_ADAPTER_RESETTING);
-			// ixl_handle_empr_reset(pf);
-			// iflib_init_locked(ctx);
+			ixl_handle_empr_reset(pf);
+			mtx_lock(iflib_ctx_lock_get(ctx));
+			iflib_init_locked(ctx);
 			return;
 		}
 	}
@@ -1285,8 +1291,10 @@ ixl_if_update_admin_status(if_ctx_t ctx)
 	if (pf->state & IXL_PF_STATE_PF_RESET_REQ) {
 		device_printf(pf->dev, "Doing PF reset...\n");
 		iflib_stop(ctx);
+		mtx_unlock(iflib_ctx_lock_get(ctx));
 		ixl_teardown_hw_structs(pf);
 		ixl_reset(pf);
+		mtx_lock(iflib_ctx_lock_get(ctx));
 		device_printf(pf->dev, "PF reset done.\n");
 		// TODO: Do init if previously up!
 		iflib_init_locked(ctx);
