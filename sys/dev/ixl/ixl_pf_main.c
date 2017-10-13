@@ -246,7 +246,9 @@ retry:
 	return (0);
 }
 
-/* For the set_advertise sysctl */
+/*
+ * For the set_advertise sysctl
+ */
 void
 ixl_get_initial_advertised_speeds(struct ixl_pf *pf)
 {
