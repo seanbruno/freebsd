@@ -778,7 +778,7 @@ iflib_netmap_register(struct netmap_adapter *na, int onoff)
 	iflib_stop(ctx);
 	iflib_init_locked(ctx);
 	IFDI_CRCSTRIP_SET(ctx, onoff, iflib_crcstrip); // XXX why twice ?
-	status = ifp->if_drv_flags & IFF_DRV_RUNNING ? 0 : 1;
+	status = !CTX_ACTIVE(ctx);
 	if (status)
 		nm_clear_native_flags(na);
 	CTX_UNLOCK(ctx);
@@ -2102,7 +2102,7 @@ iflib_timer(void *arg)
 	if_ctx_t ctx = txq->ift_ctx;
 	if_softc_ctx_t sctx = &ctx->ifc_softc_ctx;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
+	if (!CTX_ACTIVE(ctx))
 		return;
 	/*
 	** Check on the state of the TX queue(s), this
@@ -2123,7 +2123,7 @@ iflib_timer(void *arg)
 		GROUPTASK_ENQUEUE(&txq->ift_task);
 
 	sctx->isc_pause_frames = 0;
-	if (if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING) 
+	if (CTX_ACTIVE(ctx)) 
 		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
 	return;
 hung:
@@ -3540,7 +3540,7 @@ _task_fn_rx(void *context)
 	rxq->ifr_cpu_exec_count[curcpu]++;
 #endif
 	DBG_COUNTER_INC(task_fn_rxs);
-	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
+	if (__predict_false(!CTX_ACTIVE(ctx)))
 		return;
 	more = true;
 #ifdef DEV_NETMAP
@@ -3563,7 +3563,7 @@ _task_fn_rx(void *context)
 			KASSERT(rc != ENOTSUP, ("MSI-X support requires queue_intr_enable, but not implemented in driver"));
 		}
 	}
-	if (__predict_false(!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)))
+	if (__predict_false(!CTX_ACTIVE(ctx)))
 		return;
 	if (more)
 		GROUPTASK_ENQUEUE(&rxq->ifr_task);
@@ -3577,7 +3577,7 @@ _task_fn_admin(void *context)
 	iflib_txq_t txq;
 	int i;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING)) {
+	if (!CTX_ACTIVE(ctx)) {
 		if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_OACTIVE)) {
 			return;
 		}
@@ -3611,7 +3611,7 @@ _task_fn_iov(void *context)
 {
 	if_ctx_t ctx = context;
 
-	if (!(if_getdrvflags(ctx->ifc_ifp) & IFF_DRV_RUNNING))
+	if (!CTX_ACTIVE(ctx))
 		return;
 
 	CTX_LOCK(ctx);
@@ -3668,7 +3668,7 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	iflib_txq_t txq;
 	int err, qidx;
 
-	if (__predict_false((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || !LINK_ACTIVE(ctx))) {
+	if (__predict_false(!CTX_ACTIVE(ctx) || !LINK_ACTIVE(ctx))) {
 		DBG_COUNTER_INC(tx_frees);
 		m_freem(m);
 		return (ENOBUFS);
@@ -4607,7 +4607,7 @@ iflib_queues_alloc(if_ctx_t ctx)
 	txq = NULL;
 	rxq = NULL;
 
-/* Allocate the TX ring struct memory */
+	/* Allocate the TX ring struct memory */
 	if (!(txq =
 	    (iflib_txq_t) malloc(sizeof(struct iflib_txq) *
 	    ntxqsets, M_IFLIB, M_NOWAIT | M_ZERO))) {
@@ -4725,7 +4725,7 @@ iflib_queues_alloc(if_ctx_t ctx)
 			fl[j].ifl_ifdi = &rxq->ifr_ifdi[j + rxq->ifr_fl_offset];
 			fl[j].ifl_rxd_size = scctx->isc_rxd_size[j];
 		}
-        /* Allocate receive buffers for the ring*/
+		/* Allocate receive buffers for the ring */
 		if (iflib_rxsd_alloc(rxq)) {
 			device_printf(dev,
 			    "Critical Failure setting up receive buffers\n");
@@ -5014,7 +5014,7 @@ iflib_irq_alloc_generic(if_ctx_t ctx, if_irq_t irq, int rid,
 }
 
 void
-iflib_softirq_alloc_generic(if_ctx_t ctx, if_irq_t irq, iflib_intr_type_t type,  void *arg, int qid, char *name)
+iflib_softirq_alloc_generic(if_ctx_t ctx, if_irq_t irq, iflib_intr_type_t type, void *arg, int qid, char *name)
 {
 	struct grouptask *gtask;
 	struct taskqgroup *tqg;
