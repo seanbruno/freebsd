@@ -47,7 +47,7 @@
 /*********************************************************************
  *  Driver version
  *********************************************************************/
-char ixl_driver_version[] = "1.7.12-iflib-k";
+char ixl_driver_version[] = "1.7.x-iflib-k";
 
 /*********************************************************************
  *  PCI Device ID Table
@@ -935,6 +935,8 @@ ixl_if_msix_intr_assign(if_ctx_t ctx, int msix)
 		}
 		rx_que->msix = vector;
 	}
+
+	bzero(buf, sizeof(buf));
 
 	for (i = 0, vector = 1; i < vsi->num_tx_queues; i++, vector++, tx_que++) {
 		rid = vector + 1;
