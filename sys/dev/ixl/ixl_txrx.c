@@ -660,13 +660,13 @@ ixl_rx_checksum(if_rxd_info_t ri, u32 status, u32 error, u8 ptype)
 {
 	struct i40e_rx_ptype_decoded decoded;
 
-	decoded = decode_rx_desc_ptype(ptype);
-	/* Errors? */
- 	if (error & ((1 << I40E_RX_DESC_ERROR_IPE_SHIFT) |
-	    (1 << I40E_RX_DESC_ERROR_L4E_SHIFT))) {
-		ri->iri_csum_flags = 0;
+	ri->iri_csum_flags = 0;
+
+	/* No L3 or L4 checksum was calculated */
+	if (!(status & (1 << I40E_RX_DESC_STATUS_L3L4P_SHIFT)))
 		return;
-	}
+
+	decoded = decode_rx_desc_ptype(ptype);
 
 	/* IPv6 with extension headers likely have bad csum */
 	if (decoded.outer_ip == I40E_RX_PTYPE_OUTER_IP &&
@@ -676,14 +676,20 @@ ixl_rx_checksum(if_rxd_info_t ri, u32 status, u32 error, u8 ptype)
 			ri->iri_csum_flags = 0;
 			return;
 		}
- 
-	/* IP Checksum Good */
-	ri->iri_csum_flags = CSUM_IP_CHECKED;
-	ri->iri_csum_flags |= CSUM_IP_VALID;
 
-	if (status & (1 << I40E_RX_DESC_STATUS_L3L4P_SHIFT)) {
-		ri->iri_csum_flags |= 
-		    (CSUM_DATA_VALID | CSUM_PSEUDO_HDR);
-		ri->iri_csum_data |= htons(0xffff);
-	}
+	ri->iri_csum_flags |= CSUM_L3_CALC;
+
+	/* IPv4 checksum error */
+	if (error & (1 << I40E_RX_DESC_ERROR_IPE_SHIFT))
+		return;
+
+	ri->iri_csum_flags |= CSUM_L3_VALID;
+	ri->iri_csum_flags |= CSUM_L4_CALC;
+
+	/* L4 checksum error */
+	if (error & (1 << I40E_RX_DESC_ERROR_L4E_SHIFT))
+		return;
+ 
+	ri->iri_csum_flags |= CSUM_L4_VALID;
+	ri->iri_csum_data |= htons(0xffff);
 }
