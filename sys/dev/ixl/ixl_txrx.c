@@ -223,7 +223,6 @@ ixl_tso_setup(struct tx_ring *txr, if_pkt_info_t pi)
 
 	TXD->tunneling_params = htole32(0);
 
-	// XXX: This guy really likes masking numbers
 	return ((idx + 1) & (scctx->isc_ntxd[0]-1));
 }
 
@@ -298,7 +297,6 @@ ixl_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	if (tx_intr) {
 		txr->tx_rsq[txr->tx_rs_pidx] = pidx_last;
 		txr->tx_rs_pidx = (txr->tx_rs_pidx+1) & mask;
-		// TODO: Should this assert be kept?
 		MPASS(txr->tx_rs_pidx != txr->tx_rs_cidx);
 	}
 	pi->ipi_new_pidx = i;
@@ -345,6 +343,7 @@ ixl_init_tx_ring(struct ixl_vsi *vsi, struct ixl_tx_queue *que)
 	wr32(vsi->hw, I40E_QTX_HEAD(txr->me), 0);
 }
 
+#if 0
 /*             
 ** ixl_get_tx_head - Retrieve the value from the 
 **    location the HW records its HEAD index
@@ -359,6 +358,7 @@ ixl_get_tx_head(struct ixl_tx_queue *que)
 
 	return LE32_TO_CPU(*(volatile __le32 *)head);
 }
+#endif
 
 static int
 ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
