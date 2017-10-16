@@ -32,12 +32,6 @@
 ******************************************************************************/
 /*$FreeBSD$*/
 
-/*
-**	IXL driver TX/RX Routines:
-**	    This was seperated to allow usage by
-** 	    both the PF and VF drivers.
-*/
-
 #ifndef IXL_STANDALONE_BUILD
 #include "opt_inet.h"
 #include "opt_inet6.h"
@@ -55,7 +49,6 @@ static void	ixl_rx_checksum(if_rxd_info_t ri, u32 status, u32 error, u8 ptype);
 
 static int	ixl_isc_txd_encap(void *arg, if_pkt_info_t pi);
 static void	ixl_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx);
-//static int	ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear);
 static int	ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear);
 
 static void	ixl_isc_rxd_refill(void *arg, if_rxd_update_t iru);
@@ -248,15 +241,13 @@ ixl_isc_txd_encap(void *arg, if_pkt_info_t pi)
 	int             	i, j, mask, pidx_last;
 	u32			cmd, off, tx_intr;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	cmd = off = 0;
 	i = pi->ipi_pidx;
 
 	tx_intr = (pi->ipi_flags & IPI_TX_INTR);
-	//device_printf(iflib_get_dev(vsi->ctx), "%s: tx_intr %d\n", __func__, tx_intr);
 
 	/* Set up the TSO/CSUM offload */
+	// device_printf(iflib_get_dev(vsi->ctx), "%s: csum_flags %b\n", __func__, pi->ipi_csum_flags, CSUM_BITS);
 	if (pi->ipi_csum_flags & CSUM_OFFLOAD) {
 		/* Set up the TSO context descriptor if required */
 		if (pi->ipi_csum_flags & CSUM_TSO) {
@@ -311,8 +302,6 @@ ixl_isc_txd_flush(void *arg, uint16_t txqid, qidx_t pidx)
 	struct ixl_vsi *vsi = arg;
 	struct tx_ring *txr = &vsi->tx_queues[txqid].txr;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	/*
 	 * Advance the Transmit Descriptor Tail (Tdt), this tells the
 	 * hardware that this frame is available to transmit.
@@ -332,8 +321,6 @@ ixl_init_tx_ring(struct ixl_vsi *vsi, struct ixl_tx_queue *que)
 {
 	struct tx_ring *txr = &que->txr;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	/* Clear the old ring contents */
 	bzero((void *)txr->tx_base,
 	      (sizeof(struct i40e_tx_desc)) * vsi->shared->isc_ntxd[0]);
@@ -342,23 +329,6 @@ ixl_init_tx_ring(struct ixl_vsi *vsi, struct ixl_tx_queue *que)
 	wr32(vsi->hw, txr->tail, 0);
 	wr32(vsi->hw, I40E_QTX_HEAD(txr->me), 0);
 }
-
-#if 0
-/*             
-** ixl_get_tx_head - Retrieve the value from the 
-**    location the HW records its HEAD index
-*/
-static inline u32
-ixl_get_tx_head(struct ixl_tx_queue *que)
-{
-	struct tx_ring  *txr = &que->txr;
-	void *head = &txr->tx_base[que->vsi->shared->isc_ntxd[0]];
-
-	// device_printf(iflib_get_dev(que->vsi->ctx), "%s: begin\n", __func__);
-
-	return LE32_TO_CPU(*(volatile __le32 *)head);
-}
-#endif
 
 static int
 ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
@@ -373,13 +343,7 @@ ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
 	int32_t delta;
 	bool is_done;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	rs_cidx = txr->tx_rs_cidx;
-	/*
-	device_printf(iflib_get_dev(vsi->ctx), "%s: rs_cidx %d, txr->tx_rs_pidx %d\n", __func__,
-	    rs_cidx, txr->tx_rs_pidx);
-	*/
 	if (rs_cidx == txr->tx_rs_pidx)
 		return (0);
 	cur = txr->tx_rsq[rs_cidx];
@@ -396,11 +360,6 @@ ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
 		MPASS(prev == 0 || delta != 0);
 		if (delta < 0)
 			delta += ntxd;
-		/*
-		device_printf(iflib_get_dev(vsi->ctx),
-			      "%s: cidx_processed=%u cur=%u clear=%d delta=%d\n",
-			      __FUNCTION__, prev, cur, clear, delta);
-		*/
 		processed += delta;
 		prev  = cur;
 		rs_cidx = (rs_cidx + 1) & (ntxd-1);
@@ -414,30 +373,8 @@ ixl_isc_txd_credits_update_dd(void *arg, uint16_t txqid, bool clear)
 	txr->tx_rs_cidx = rs_cidx;
 	txr->tx_cidx_processed = prev;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: processed %d\n", __func__, processed);
 	return (processed);
 }
-
-#if 0
-static int
-ixl_isc_txd_credits_update_hwb(void *arg, uint16_t txqid, bool clear)
-{
-	struct ixl_vsi		*vsi = arg;
-	struct ixl_tx_queue	*que = &vsi->tx_queues[txqid];
-
-	int head, credits = 0;
-
-	/* Get the Head WB value */
-	head = ixl_get_tx_head(que);
-
-	// TODO: Replace cidx
-	// credits = head - cidx;
-	if (credits < 0)
-		credits += vsi->shared->isc_ntxd[0];
-
-	return (credits);
-}
-#endif
 
 /*********************************************************************
  *
@@ -489,11 +426,8 @@ ixl_isc_rxd_available(void *arg, uint16_t rxqid, qidx_t idx, qidx_t budget)
 	uint32_t status;
 	int cnt, i, nrxd;
 
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	nrxd = vsi->shared->isc_nrxd[0];
 
-	// Stolen from em
 	if (budget == 1) {
 		rxd = &rxr->rx_base[idx];
 		qword = le64toh(rxd->wb.qword1.status_error_len);
@@ -583,9 +517,6 @@ ixl_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	bool		eop;
 	int i, cidx;
 
-	/* XXX: No packet split support, so hlen is unused */
-	// device_printf(iflib_get_dev(vsi->ctx), "%s: begin\n", __func__);
-
 	cidx = ri->iri_cidx;
 	i = 0;
 	do {
@@ -633,7 +564,6 @@ ixl_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
 	} while (!eop);
 
 	/* capture data for dynamic ITR adjustment */
-	// TODO: Figure out why these are repeated...
 	rxr->packets++;
 	rxr->rx_packets++;
 
