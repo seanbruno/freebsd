@@ -36,6 +36,21 @@
 
 #include "ixl.h"
 
+/*
+ * For dma memory allocation debugging
+ */
+char * const i40e_memory_type_strings[] = {
+	"i40e_mem_arq_buf",
+	"i40e_mem_asq_buf",
+	"i40e_mem_atq_buf",
+	"i40e_mem_arq_ring",
+	"i40e_mem_atq_ring",
+	"i40e_mem_pd",
+	"i40e_mem_bp",
+	"i40e_mem_bp_jumbo",
+	"i40e_mem_reserved"
+};
+
 /********************************************************************
  * Manage DMA'able memory.
  *******************************************************************/
@@ -70,6 +85,7 @@ i40e_allocate_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem,
 	device_t	dev = ((struct i40e_osdep *)hw->back)->dev;
 	int		err;
 
+	device_printf(dev, "%s: type %s, size %lu\n", __func__, i40e_memory_type_strings[type], size);
 #if 0
 	device_printf(dev, "%s: type %d, size %lu\n", __func__, type, size);
 
@@ -144,8 +160,9 @@ fail_0:
 i40e_status
 i40e_free_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem)
 {
-	//device_t	dev = ((struct i40e_osdep *)hw->back)->dev;
+	device_t	dev = ((struct i40e_osdep *)hw->back)->dev;
 
+	device_printf(dev, "%s: type %s, size %lu\n", __func__, i40e_memory_type_strings[mem->type], mem->size);
 #if 0
 	if (mem->type == i40e_mem_bp_jumbo) {
 		device_printf(dev, "%s: not freeing memory for mem_bp_jumbo\n", __func__);
