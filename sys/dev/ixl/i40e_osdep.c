@@ -81,28 +81,8 @@ i40e_status
 i40e_allocate_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem,
 	enum i40e_memory_type type, u64 size, u32 alignment)
 {
-	// struct i40e_osdep *osdep = ((struct i40e_osdep *)hw->back);
 	device_t	dev = ((struct i40e_osdep *)hw->back)->dev;
 	int		err;
-
-	device_printf(dev, "%s: type %s, size %lu\n", __func__, i40e_memory_type_strings[type], size);
-#if 0
-	device_printf(dev, "%s: type %d, size %lu\n", __func__, type, size);
-
-	// DEBUG -- try out this special case
-	if (type == i40e_mem_bp_jumbo) {
-		device_printf(dev, "%s: - re-using memory for mem_bp_jumbo\n", __func__);
-
-		bcopy(&osdep->lan_hmc_mem, mem, sizeof(*mem));
-
-		device_printf(dev, "%s: - mem->size is %lu\n", __func__, mem->size);
-		bzero(mem->va, mem->size);
-
-		bus_dmamap_sync(mem->tag, mem->map,
-		    BUS_DMASYNC_PREREAD|BUS_DMASYNC_PREWRITE);
-		return (I40E_SUCCESS);
-	}
-#endif
 
 	err = bus_dma_tag_create(bus_get_dma_tag(dev),	/* parent */
 			       alignment, 0,	/* alignment, bounds */
@@ -160,17 +140,6 @@ fail_0:
 i40e_status
 i40e_free_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem)
 {
-	device_t	dev = ((struct i40e_osdep *)hw->back)->dev;
-
-	device_printf(dev, "%s: type %s, size %lu\n", __func__, i40e_memory_type_strings[mem->type], mem->size);
-#if 0
-	if (mem->type == i40e_mem_bp_jumbo) {
-		device_printf(dev, "%s: not freeing memory for mem_bp_jumbo\n", __func__);
-		// bus_dmamap_unload(mem->tag, mem->map);
-		return (0);
-	}
-#endif
-
 	bus_dmamap_sync(mem->tag, mem->map,
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 	bus_dmamap_unload(mem->tag, mem->map);

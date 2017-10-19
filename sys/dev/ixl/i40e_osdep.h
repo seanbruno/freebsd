@@ -159,9 +159,6 @@ struct i40e_dma_mem {
 };
 
 struct i40e_osdep {
-	// TODO: DEBUG -- have the HMC re-use this memory instead of destroying/creating a new one
-	struct i40e_dma_mem	lan_hmc_mem;
-
 	bus_space_tag_t		mem_bus_space_tag;
 	bus_space_handle_t	mem_bus_space_handle;
 	bus_size_t		mem_bus_space_size;
