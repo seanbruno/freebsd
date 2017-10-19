@@ -77,6 +77,9 @@ i40e_free_virt_mem(struct i40e_hw *hw, struct i40e_virt_mem *mem)
 	return(0);
 }
 
+/*
+ * TODO: The error codes returned here aren't the expected type...
+ */
 i40e_status
 i40e_allocate_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem,
 	enum i40e_memory_type type, u64 size, u32 alignment)
@@ -145,7 +148,7 @@ i40e_free_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem)
 	bus_dmamap_unload(mem->tag, mem->map);
 	bus_dmamem_free(mem->tag, mem->va, mem->map);
 	bus_dma_tag_destroy(mem->tag);
-	return (0);
+	return (I40E_SUCCESS);
 }
 
 void
