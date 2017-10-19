@@ -212,15 +212,6 @@ TUNABLE_INT("hw.ixl.ring_size", &ixl_ring_size);
 SYSCTL_INT(_hw_ixl, OID_AUTO, ring_size, CTLFLAG_RDTUN,
     &ixl_ring_size, 0, "Descriptor Ring Size");
 
-/*
-** Number of descriptors per ring:
-**   - TX and RX are the same size
-*/
-static int ixl_enable_hwb = 0;
-TUNABLE_INT("hw.ixl.enable_hwb", &ixl_enable_hwb);
-SYSCTL_INT(_hw_ixl, OID_AUTO, enable_hwb, CTLFLAG_RDTUN,
-    &ixl_enable_hwb, 0, "Enable Head Writeback for TX Descriptors");
-
 /* 
 ** This can be set manually, if left as 0 the
 ** number of queues will be calculated based
@@ -1665,7 +1656,6 @@ ixl_save_pf_tunables(struct ixl_pf *pf)
 	pf->rx_itr = ixl_rx_itr;
 	pf->dbg_mask = ixl_core_debug_mask;
 	pf->hw.debug_mask = ixl_shared_debug_mask;
-	pf->enable_hwb = ixl_enable_hwb;
 
 	/* TODO: Ring size tunable probably needs to be removed */
 	/* But maybe the iflib value should be checked here, too */

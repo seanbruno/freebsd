@@ -1076,15 +1076,8 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 		tctx.qlen = scctx->isc_ntxd[0];
 		tctx.fc_ena = 0;
 		tctx.rdylist = vsi->info.qs_handle[0]; /* index is TC */
-		/* Enable HEAD writeback */
-		if (pf->enable_hwb) {
-			tctx.head_wb_ena = 1;
-			tctx.head_wb_addr = txr->tx_paddr +
-			    (scctx->isc_ntxd[0] * sizeof(struct i40e_tx_desc));
-		} else {
-			tctx.head_wb_ena = 0;
-			tctx.head_wb_addr = 0; 
-		}
+		tctx.head_wb_ena = 0;
+		tctx.head_wb_addr = 0;
 		tctx.rdylist_act = 0;
 		err = i40e_clear_lan_tx_queue_context(hw, i);
 		if (err) {
