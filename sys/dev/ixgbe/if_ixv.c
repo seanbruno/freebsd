@@ -119,8 +119,6 @@ static int      ixv_sysctl_debug(SYSCTL_HANDLER_ARGS);
 static void     ixv_set_ivar(struct adapter *, u8, u8, s8);
 
 static u8       *ixv_mc_array_itr(struct ixgbe_hw *, u8 **, u32 *);
-static void     ixv_set_sysctl_value(struct adapter *, const char *,
-                                     const char *, int *, int);
 
 /* The MSI-X Interrupt handlers */
 static int      ixv_msix_que(void *);
@@ -1908,19 +1906,6 @@ ixv_add_stats_sysctls(struct adapter *adapter)
 	SYSCTL_ADD_UQUAD(ctx, stat_list, OID_AUTO, "good_octets_txd",
 	    CTLFLAG_RD, &stats->vfgotc, "Good Octets Transmitted");
 } /* ixv_add_stats_sysctls */
-
-/************************************************************************
- * ixv_set_sysctl_value
- ************************************************************************/
-static void
-ixv_set_sysctl_value(struct adapter *adapter, const char *name,
-	const char *description, int *limit, int value)
-{
-	*limit = value;
-	SYSCTL_ADD_INT(device_get_sysctl_ctx(adapter->dev),
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(adapter->dev)),
-	    OID_AUTO, name, CTLFLAG_RW, limit, value, description);
-} /* ixv_set_sysctl_value */
 
 /************************************************************************
  * ixv_print_debug_info

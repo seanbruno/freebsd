@@ -187,8 +187,6 @@ static void ixgbe_config_gpie(struct adapter *adapter);
 static void ixgbe_config_delay_values(struct adapter *adapter);
 
 /* Sysctl handlers */
-static void ixgbe_set_sysctl_value(struct adapter *, const char *,
-                                   const char *, int *, int);
 static int  ixgbe_sysctl_flowcntl(SYSCTL_HANDLER_ARGS);
 static int  ixgbe_sysctl_advertise(SYSCTL_HANDLER_ARGS);
 static int  ixgbe_sysctl_interrupt_rate_handler(SYSCTL_HANDLER_ARGS);
@@ -3875,19 +3873,6 @@ ixgbe_free_pci_resources(if_ctx_t ctx)
 		                     PCIR_BAR(0), adapter->pci_mem);
 
 } /* ixgbe_free_pci_resources */
-
-/************************************************************************
- * ixgbe_set_sysctl_value
- ************************************************************************/
-static void
-ixgbe_set_sysctl_value(struct adapter *adapter, const char *name,
-    const char *description, int *limit, int value)
-{
-	*limit = value;
-	SYSCTL_ADD_INT(device_get_sysctl_ctx(adapter->dev),
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(adapter->dev)),
-	    OID_AUTO, name, CTLFLAG_RW, limit, value, description);
-} /* ixgbe_set_sysctl_value */
 
 /************************************************************************
  * ixgbe_sysctl_flowcntl
