@@ -183,15 +183,6 @@ static driver_t ixv_if_driver = {
  * TUNEABLE PARAMETERS:
  */
 
-/*
- * AIM: Adaptive Interrupt Moderation
- * which means that the interrupt rate
- * is varied over time based on the
- * traffic for that interrupt vector
- */
-static int ixv_enable_aim = FALSE;
-TUNABLE_INT("hw.ixv.enable_aim", &ixv_enable_aim);
-
 /* Flow control setting, default to full */
 static int ixv_flow_control = ixgbe_fc_full;
 TUNABLE_INT("hw.ixv.flow_control", &ixv_flow_control);
@@ -429,11 +420,6 @@ ixv_if_attach_pre(if_ctx_t ctx)
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO, "debug",
 	    CTLTYPE_INT | CTLFLAG_RW, adapter, 0, ixv_sysctl_debug, "I",
 	    "Debug Info");
-
-	SYSCTL_ADD_INT(device_get_sysctl_ctx(dev),
-	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
-	    "enable_aim", CTLFLAG_RW, &ixv_enable_aim, 1,
-	    "Interrupt Moderation");
 
 	/* Determine hardware revision */
 	ixv_identify_hardware(ctx);
@@ -712,65 +698,9 @@ ixv_msix_que(void *arg)
 {
 	struct ix_rx_queue *que = arg;
 	struct adapter     *adapter = que->adapter;
-	struct rx_ring     *rxr = &que->rxr;
-	u32                newitr = 0;
-#ifdef notyet
-	struct tx_ring     *txr = &que->txr;
-#endif
 
 	ixv_disable_queue(adapter, que->msix);
 	++que->irqs;
-
-	/* Do AIM now? */
-
-	if (ixv_enable_aim == FALSE)
-		goto no_calc;
-	/*
-	 * Do Adaptive Interrupt Moderation:
-	 *  - Write out last calculated setting
-	 *  - Calculate based on average size over
-	 *    the last interval.
-	 */
-	if (que->eitr_setting)
-		IXGBE_WRITE_REG(&adapter->hw, IXGBE_VTEITR(que->msix),
-		    que->eitr_setting);
-
-	que->eitr_setting = 0;
-
-#ifdef notyet
-	if ((txr->bytes) && (txr->packets))
-		newitr = txr->bytes/txr->packets;
-#endif
-	if (rxr->bytes == 0)
-		goto no_calc;
-
-	if ((rxr->bytes) && (rxr->packets))
-		newitr = max(newitr, (rxr->bytes / rxr->packets));
-	newitr += 24; /* account for hardware frame, crc */
-
-	/* set an upper boundary */
-	newitr = min(newitr, 3000);
-
-	/* Be nice to the mid range */
-	if ((newitr > 300) && (newitr < 1200))
-		newitr = (newitr / 3);
-	else
-		newitr = (newitr / 2);
-
-	newitr |= newitr << 16;
-
-	/* save for next interrupt */
-	que->eitr_setting = newitr;
-
-	/* Reset state */
-#ifdef notyet
-	txr->bytes = 0;
-	txr->packets = 0;
-#endif
-	rxr->bytes = 0;
-	rxr->packets = 0;
-
-no_calc:
 
 	return (FILTER_SCHEDULE_THREAD);
 } /* ixv_msix_que */

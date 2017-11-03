@@ -286,16 +286,6 @@ static driver_t ixgbe_if_driver = {
   "ixgbe_if", ixgbe_if_methods, sizeof(struct adapter)
 };
 
-/*
- * AIM: Adaptive Interrupt Moderation
- * which means that the interrupt rate
- * is varied over time based on the
- * traffic for that interrupt vector
- */
-static int ixgbe_enable_aim = TRUE;
-SYSCTL_INT(_hw_ix, OID_AUTO, enable_aim, CTLFLAG_RWTUN, &ixgbe_enable_aim, 0,
-    "Enable adaptive interrupt moderation");
-
 static int ixgbe_max_interrupt_rate = (4000000 / IXGBE_LOW_LATENCY);
 SYSCTL_INT(_hw_ix, OID_AUTO, max_interrupt_rate, CTLFLAG_RDTUN,
     &ixgbe_max_interrupt_rate, 0, "Maximum interrupts per second");
@@ -1092,7 +1082,6 @@ ixgbe_if_attach_post(if_ctx_t ctx)
 
 	/* hw.ix defaults init */
 	ixgbe_set_advertise(adapter, ixgbe_advertise_speed);
-	adapter->enable_aim = ixgbe_enable_aim;
 
 	/* Enable the optics for 82599 SFP+ fiber */
 	ixgbe_enable_tx_laser(hw);
@@ -2067,13 +2056,7 @@ ixgbe_msix_que(void *arg)
 {
 	struct ix_rx_queue *que = arg;
 	struct adapter     *adapter = que->adapter;
-#ifdef notyet
-	struct tx_ring     *txr = &que->txr;
-#endif
-	struct rx_ring     *rxr = &que->rxr;
 	struct ifnet       *ifp = iflib_get_ifp(que->adapter->ctx);
-	u32                newitr = 0;
-
 
 	/* Protect against spurious interrupts */
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
@@ -2081,56 +2064,6 @@ ixgbe_msix_que(void *arg)
 
 	ixgbe_disable_queue(adapter, que->msix);
 	++que->irqs;
-
-	if (ixgbe_enable_aim == FALSE)
-		goto no_calc;
-	/*
-	 * Do Adaptive Interrupt Moderation:
-	 *  - Write out last calculated setting
-	 *  - Calculate based on average size over
-	 *    the last interval.
-	 */
-	if (que->eitr_setting)
-		IXGBE_WRITE_REG(&adapter->hw, IXGBE_EITR(que->msix),
-		    que->eitr_setting);
-
-	que->eitr_setting = 0;
-
-	/* Idle, do nothing */
-#ifdef notyet
-	if ((txr->bytes) && (txr->packets))
-		newitr = txr->bytes/txr->packets;
-#endif
-	if ((rxr->bytes) && (rxr->packets))
-		newitr = max(newitr, (rxr->bytes / rxr->packets));
-	newitr += 24; /* account for hardware frame, crc */
-
-	/* set an upper boundary */
-	newitr = min(newitr, 3000);
-
-	/* Be nice to the mid range */
-	if ((newitr > 300) && (newitr < 1200))
-		newitr = (newitr / 3);
-	else
-		newitr = (newitr / 2);
-
-	if (adapter->hw.mac.type == ixgbe_mac_82598EB)
-		newitr |= newitr << 16;
-	else
-		newitr |= IXGBE_EITR_CNT_WDIS;
-
-	/* save for next interrupt */
-	que->eitr_setting = newitr;
-
-	/* Reset state */
-#ifdef notyet
-	txr->bytes = 0;
-	txr->packets = 0;
-#endif
-	rxr->bytes = 0;
-	rxr->packets = 0;
-
-no_calc:
 
 	return (FILTER_SCHEDULE_THREAD);
 } /* ixgbe_msix_que */
@@ -2588,10 +2521,6 @@ ixgbe_add_device_sysctls(if_ctx_t ctx)
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "fc",
 	    CTLTYPE_INT | CTLFLAG_RW, adapter, 0, ixgbe_sysctl_flowcntl, "I",
 	    IXGBE_SYSCTL_DESC_SET_FC);
-
-	adapter->enable_aim = ixgbe_enable_aim;
-	SYSCTL_ADD_INT(ctx_list, child, OID_AUTO, "enable_aim", CTLFLAG_RW,
-	    &adapter->enable_aim, 1, "Interrupt Moderation");
 
 	SYSCTL_ADD_PROC(ctx_list, child, OID_AUTO, "advertise_speed",
 	    CTLTYPE_INT | CTLFLAG_RW, adapter, 0, ixgbe_sysctl_advertise, "I",
